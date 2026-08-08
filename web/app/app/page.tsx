@@ -12,10 +12,11 @@ import { ChallengePanel } from "@/components/ChallengePanel";
 import { SignInButton } from "@/components/SignInButton";
 import { explorerAddress, explorerTx, FAUCET_URL } from "@/lib/chain";
 import { fmtClock, mon, phaseLabel, short, ZERO, ZERO_HASH } from "@/lib/format";
-import { SESSION_KEY, friendByUsername, type FriendSession } from "@/lib/friends";
+import { FRIENDS, SESSION_KEY, friendByUsername, type FriendSession } from "@/lib/friends";
 import { isRpcNoise, friendlyRpcError } from "@/lib/rpc";
 import type { Circle, FeedItem, MemberView, Phase, Verdict } from "@/lib/types";
 import type { Preset } from "@/lib/presets";
+import type { Actor } from "@/lib/chain";
 
 const CIRCLE_KEY = "focusbond:circleId";
 
@@ -329,6 +330,35 @@ export default function AppPage() {
     if (result) await refresh(id);
   };
 
+  /** Second browser optional — stake another demo friend into this lobby. */
+  const addDemoFriend = async (actor: Actor) => {
+    if (circleId === null || !circle) return;
+    const friend = FRIENDS.find((f) => f.actor === actor);
+    if (!friend) return;
+    setBusy(`adding ${friend.displayName}`);
+    setError(null);
+    try {
+      const res = await fetch("/api/action", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          actor,
+          fn: "join",
+          args: [`${circleId}n`],
+          value: circle.stake.toString(),
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "join failed");
+      setNotice(`${friend.displayName} staked — you can Start round`);
+      await refresh(circleId);
+    } catch (err) {
+      setError(friendlyRpcError(err, `Couldn’t add ${friend.displayName}.`));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const checkIn = async (file: File) => {
     if (circleId === null || !circle || !session || !address) return;
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -421,6 +451,10 @@ export default function AppPage() {
   const myMember = address
     ? board.find((m) => m.addr.toLowerCase() === address.toLowerCase())
     : undefined;
+  const demoJoinCandidates = FRIENDS.filter((f) => {
+    if (session && f.username === session.username) return false;
+    return !board.some((m) => actorMap[m.addr.toLowerCase()]?.toLowerCase() === f.username);
+  });
 
   const copyInvite = async () => {
     if (circleId === null) return;
@@ -515,7 +549,11 @@ export default function AppPage() {
                 </p>
               </div>
               <div className={`ongoing-timer ${phase === "focus" && secondsLeft <= 15 ? "urgent" : ""}`}>
-                {phase === "focus" || phase === "challenge" ? fmtClock(secondsLeft) : "--:--"}
+                {phase === "focus" || phase === "challenge"
+                  ? fmtClock(secondsLeft)
+                  : phase === "lobby" && circle
+                    ? fmtClock(Number(circle.roundSeconds))
+                    : "--:--"}
               </div>
             </div>
 
@@ -535,12 +573,47 @@ export default function AppPage() {
               </div>
             )}
 
+            {phase === "lobby" && (
+              <div className="alert risk">
+                {board.length < 2 ? (
+                  <>
+                    <b>Timer starts after 2 friends stake.</b> You’re alone in this circle — add a
+                    demo friend below, or open another browser as Alice/Bob and join with code{" "}
+                    <code>{circleId !== null ? toInviteCode(circleId) : "—"}</code>.
+                  </>
+                ) : (
+                  <>
+                    <b>{board.length} friends ready.</b> Hit <b>Start round</b> to start the clock —
+                    that’s when upload appears.
+                  </>
+                )}
+              </div>
+            )}
+
+            {phase === "settled" && (
+              <div className="alert ok">
+                This round already paid out. Create a new challenge, get both friends to stake, then hit{" "}
+                <b>Start round</b> — upload appears only while the timer is running.
+              </div>
+            )}
+
             <div className="ongoing-actions">
               {phase === "lobby" && iAmMember && board.length >= 2 && (
                 <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => sendTx("start", [circleId!]).then(() => refresh(circleId))}>
                   Start round
                 </button>
               )}
+              {phase === "lobby" && iAmMember && board.length < 2 && demoJoinCandidates.map((f) => (
+                <button
+                  key={f.actor}
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!!busy}
+                  onClick={() => void addDemoFriend(f.actor)}
+                >
+                  Add {f.displayName} (demo)
+                </button>
+              ))}
               {phase === "lobby" && iAmMember && (
                 <button type="button" className="btn btn-danger" disabled={!!busy} onClick={() => sendTx("abort", [circleId!]).then(() => refresh(circleId))}>
                   Abort &amp; refund
@@ -573,9 +646,30 @@ export default function AppPage() {
               {phase === "ready" && (
                 <span className="busy-label">Settling payouts…</span>
               )}
-              <button type="button" className="btn btn-ghost" onClick={copyInvite} disabled={circleId === null}>
-                {inviteCopied ? "Copied!" : "Copy invite code"}
-              </button>
+              {phase === "settled" && (
+                <>
+                  <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
+                    + New challenge
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      setActiveCircle(null);
+                      setCircle(null);
+                      setBoard([]);
+                      setNotice("Create a challenge or join with a code");
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                </>
+              )}
+              {phase !== "settled" && (
+                <button type="button" className="btn btn-ghost" onClick={copyInvite} disabled={circleId === null}>
+                  {inviteCopied ? "Copied!" : "Copy invite code"}
+                </button>
+              )}
               {busy && busy !== "settle" && <span className="busy-label">{busy}…</span>}
             </div>
 
