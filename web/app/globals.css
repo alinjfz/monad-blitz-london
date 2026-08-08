@@ -209,6 +209,12 @@ select {
   margin-bottom: 1rem;
 }
 
+.hero-signin > .btn-primary,
+.land-cta .connect-wrap > .btn-primary {
+  padding: 0.95rem 1.45rem;
+  font-size: 1.02rem;
+}
+
 .hero-note {
   color: var(--muted);
   font-size: 0.9rem;
@@ -691,14 +697,17 @@ select {
 .join-inline {
   display: flex;
   gap: 0.4rem;
+  align-items: center;
 }
 
-.join-inline input {
-  width: 110px;
+.join-inline input,
+.join-inline .field-input {
+  width: 140px;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.65rem 0.9rem;
   background: var(--bg);
+  margin-bottom: 0;
 }
 
 .ongoing-main {
@@ -831,6 +840,19 @@ select {
   font-family: var(--mono);
   font-size: 0.72rem;
   color: var(--muted);
+}
+
+.friend-code {
+  margin: 0.2rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.friend-code-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
 }
 
 .flame {
@@ -1045,13 +1067,14 @@ select {
 }
 
 .connect-option {
-  text-align: left;
+  text-align: center;
   border: 1px solid var(--line);
   background: var(--bg);
   border-radius: 12px;
   padding: 0.7rem 0.8rem;
   cursor: pointer;
   font-weight: 600;
+  width: 100%;
 }
 
 .connect-option:hover {
@@ -1081,15 +1104,124 @@ select {
   margin-bottom: 0.55rem;
 }
 
+.login-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.login-hint-code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-family: var(--mono);
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.login-hint-code:hover {
+  color: var(--accent);
+}
+
 .login-sep {
   border: 0;
   border-top: 1px solid var(--line);
   margin: 0.65rem 0;
 }
 
-.friend-quick {
+.logout-modal {
+  width: min(400px, 100%);
+  padding: 1.35rem 1.4rem 1.4rem;
+}
+
+.logout-modal h2 {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+}
+
+.logout-modal p {
+  margin: 0 0 1.25rem;
+  color: var(--muted);
+}
+
+.logout-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.invite {
   display: grid;
-  gap: 0.35rem;
+  gap: 1rem;
+}
+
+.invite-share {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.invite-code {
+  margin: 0 0 0.55rem;
+  font-family: var(--mono);
+  font-size: 1.65rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+.invite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.invite-qr-wrap {
+  flex-shrink: 0;
+  padding: 6px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+
+.invite-qr {
+  display: block;
+  width: 96px;
+  height: 96px;
+  border-radius: 6px;
+}
+
+.invite-join .join-inline {
+  align-items: stretch;
+  width: 100%;
+}
+
+.invite-join .join-inline .field-input {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  border-radius: 12px;
+  margin-bottom: 0;
+}
+
+.invite-error {
+  margin: 0.45rem 0 0;
+  font-size: 0.8rem;
+  color: var(--loss);
+}
+
+@media (max-width: 560px) {
+  .invite-share {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 .connect-hint code {

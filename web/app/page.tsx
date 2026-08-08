@@ -1,7 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { PhoneShowcase } from "@/components/PhoneShowcase";
+import { SignInButton } from "@/components/SignInButton";
+import { SESSION_KEY, type FriendSession } from "@/lib/friends";
 
 const STEPS = [
   {
@@ -38,7 +42,45 @@ const EXAMPLES = [
   { title: "Job Hunt Sprint", meta: "Weekly · email screenshots", stake: "$20" },
 ];
 
+function loadSession(): FriendSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as FriendSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function appHref() {
+  if (typeof window === "undefined") return "/app";
+  const join = new URLSearchParams(window.location.search).get("join");
+  return join ? `/app?join=${encodeURIComponent(join)}` : "/app";
+}
+
 export default function LandingPage() {
+  const router = useRouter();
+  const [session, setSession] = useState<FriendSession | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    setSession(loadSession());
+    setReady(true);
+  }, []);
+
+  const goApp = (s?: FriendSession) => {
+    if (s) {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+      setSession(s);
+    }
+    router.push(appHref());
+  };
+
+  const logout = () => {
+    localStorage.removeItem(SESSION_KEY);
+    setSession(null);
+  };
+
   return (
     <div className="landing">
       <nav className="land-nav">
@@ -48,9 +90,13 @@ export default function LandingPage() {
         <div className="land-nav-links">
           <a href="#how">How it works</a>
           <a href="#why">Why it works</a>
-          <Link href="/app" className="btn btn-primary">
-            Open app
-          </Link>
+          {ready && session ? (
+            <Link href={appHref()} className="btn btn-primary">
+              Open app
+            </Link>
+          ) : (
+            <SignInButton session={session} onLogin={goApp} onLogout={logout} />
+          )}
         </div>
       </nav>
 
@@ -67,9 +113,19 @@ export default function LandingPage() {
             their stake split among the people who showed up — the contract keeps nothing.
           </p>
           <div className="hero-cta">
-            <Link href="/app" className="btn btn-primary btn-lg">
-              Start a challenge
-            </Link>
+            {ready && session ? (
+              <Link href={appHref()} className="btn btn-primary btn-lg">
+                Open app
+              </Link>
+            ) : (
+              <SignInButton
+                session={session}
+                onLogin={goApp}
+                onLogout={logout}
+                className="hero-signin"
+                buttonLabel="Start a challenge"
+              />
+            )}
             <a href="#how" className="btn btn-ghost btn-lg">
               See how it works
             </a>
@@ -137,10 +193,14 @@ export default function LandingPage() {
 
       <section className="land-cta">
         <h2>Don&apos;t break the circle.</h2>
-        <p>Connect a wallet, grab testnet MON, and lock in with friends.</p>
-        <Link href="/app" className="btn btn-primary btn-lg">
-          Enter FocusBond
-        </Link>
+        <p>Sign in, grab testnet MON, and lock in with friends.</p>
+        {ready && session ? (
+          <Link href={appHref()} className="btn btn-primary btn-lg">
+            Enter FocusBond
+          </Link>
+        ) : (
+          <SignInButton session={session} onLogin={goApp} onLogout={logout} buttonLabel="Enter FocusBond" />
+        )}
       </section>
 
       <footer className="land-foot">

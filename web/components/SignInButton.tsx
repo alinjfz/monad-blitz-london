@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 import { monadTestnet } from "@/lib/chain";
 import { FRIENDS, type FriendSession } from "@/lib/friends";
@@ -10,20 +10,29 @@ type Props = {
   onLogin: (session: FriendSession) => void;
   onLogout: () => void;
   className?: string;
+  buttonLabel?: string;
 };
 
-export function SignInButton({ session, onLogin, onLogout, className = "" }: Props) {
+export function SignInButton({
+  session,
+  onLogin,
+  onLogout,
+  className = "",
+  buttonLabel = "Sign in",
+}: Props) {
   const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending, error: walletError } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain } = useSwitchChain();
 
   const [open, setOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const logoutTitleId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -65,20 +74,43 @@ export function SignInButton({ session, onLogin, onLogout, className = "" }: Pro
     setError("Google sign-in is available once Para is wired.");
   };
 
-  // Logged in as friend account
-  if (session) {
-    return (
-      <div className={`connect-wrap ${className}`}>
-        <button type="button" className="btn btn-ghost connect-addr" onClick={onLogout} title="Log out">
-          {session.displayName}
-        </button>
-      </div>
-    );
-  }
+  const confirmLogout = () => {
+    if (session) onLogout();
+    if (isConnected) disconnect();
+    setLogoutOpen(false);
+  };
 
-  // Logged in with browser wallet
-  if (isConnected && address) {
-    const wrongChain = chainId !== monadTestnet.id;
+  const accountLabel = session
+    ? session.displayName
+    : isConnected && address
+      ? `${address.slice(0, 6)}…${address.slice(-4)}`
+      : null;
+
+  const logoutModal = logoutOpen && (
+    <div className="modal-backdrop" onClick={() => setLogoutOpen(false)} role="presentation">
+      <div
+        className="modal logout-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={logoutTitleId}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id={logoutTitleId}>Log out?</h2>
+        <p>You’ll need to sign in again to create or join challenges.</p>
+        <div className="logout-actions">
+          <button type="button" className="btn btn-ghost" onClick={() => setLogoutOpen(false)}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" onClick={confirmLogout}>
+            Log out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (accountLabel) {
+    const wrongChain = isConnected && !session && chainId !== monadTestnet.id;
     return (
       <div className={`connect-wrap ${className}`}>
         {wrongChain && (
@@ -90,9 +122,10 @@ export function SignInButton({ session, onLogin, onLogout, className = "" }: Pro
             Switch to Monad Testnet
           </button>
         )}
-        <button type="button" className="btn btn-ghost connect-addr" onClick={() => disconnect()}>
-          {address.slice(0, 6)}…{address.slice(-4)}
+        <button type="button" className="btn btn-ghost connect-addr" onClick={() => setLogoutOpen(true)}>
+          {accountLabel}
         </button>
+        {logoutModal}
       </div>
     );
   }
@@ -100,11 +133,30 @@ export function SignInButton({ session, onLogin, onLogout, className = "" }: Pro
   return (
     <div className={`connect-wrap ${className}`} ref={panelRef}>
       <button type="button" className="btn btn-primary" onClick={() => setOpen((v) => !v)}>
-        Sign in
+        {buttonLabel}
       </button>
       {open && (
         <div className="connect-panel login-panel">
           <p className="connect-panel-title">Sign in</p>
+          <p className="login-hint">
+            Demo friends:{" "}
+            {FRIENDS.map((f, i) => (
+              <span key={f.username}>
+                {i > 0 && " · "}
+                <button
+                  type="button"
+                  className="login-hint-code"
+                  onClick={() => {
+                    setUsername(f.username);
+                    setPassword(f.password);
+                    setError(null);
+                  }}
+                >
+                  {f.username}/{f.password}
+                </button>
+              </span>
+            ))}
+          </p>
 
           <label className="field-label">Username</label>
           <input
@@ -120,7 +172,7 @@ export function SignInButton({ session, onLogin, onLogout, className = "" }: Pro
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••"
+            placeholder="alice"
             autoComplete="current-password"
             onKeyDown={(e) => e.key === "Enter" && friendLogin()}
           />
@@ -133,10 +185,6 @@ export function SignInButton({ session, onLogin, onLogout, className = "" }: Pro
           >
             {busy ? "Signing in…" : "Sign in"}
           </button>
-
-          <p className="connect-hint" style={{ marginBottom: "0.45rem" }}>
-            Friends: {FRIENDS.map((f) => f.username).join(" · ")} (password = username)
-          </p>
 
           <hr className="login-sep" />
 
@@ -167,6 +215,7 @@ export function SignInButton({ session, onLogin, onLogout, className = "" }: Pro
           )}
         </div>
       )}
+      {logoutModal}
     </div>
   );
 }

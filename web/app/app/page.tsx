@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { keccak256, parseEther, type Hex } from "viem";
 import { CreateChallengeModal } from "@/components/CreateChallengeModal";
+import { InviteFriends, fromInviteCode, toInviteCode } from "@/components/InviteFriends";
 import { SignInButton } from "@/components/SignInButton";
 import { explorerAddress, explorerTx, FAUCET_URL } from "@/lib/chain";
 import { fmtClock, mon, phaseLabel, short, ZERO, ZERO_HASH } from "@/lib/format";
-import { SESSION_KEY, type FriendSession } from "@/lib/friends";
+import { SESSION_KEY, FRIENDS, type FriendSession } from "@/lib/friends";
 import type { Circle, FeedItem, MemberView, Phase, Verdict } from "@/lib/types";
 import type { Preset } from "@/lib/presets";
 
@@ -30,8 +32,10 @@ function loadCircleId(): bigint | null {
 }
 
 export default function AppPage() {
+  const router = useRouter();
   const [session, setSession] = useState<FriendSession | null>(null);
   const [actorMap, setActorMap] = useState<Record<string, string>>({});
+  const [actorByName, setActorByName] = useState<Record<string, string>>({});
   const [circleId, setCircleId] = useState<bigint | null>(null);
   const [joinId, setJoinId] = useState("");
   const [circle, setCircle] = useState<Circle | null>(null);
@@ -141,16 +145,28 @@ export default function AppPage() {
       .then((r) => r.json())
       .then((actors: Record<string, string>) => {
         const map: Record<string, string> = {};
+        const byName: Record<string, string> = {};
         for (const [name, addr] of Object.entries(actors)) {
-          if (addr) map[addr.toLowerCase()] = name.charAt(0) + name.slice(1).toLowerCase();
+          if (!addr) continue;
+          map[addr.toLowerCase()] = name.charAt(0) + name.slice(1).toLowerCase();
+          byName[name.toUpperCase()] = addr;
         }
         setActorMap(map);
+        setActorByName(byName);
       })
       .catch(() => undefined);
   }, []);
 
   useEffect(() => {
     if (!ready) return;
+    if (session) return;
+    const params = new URLSearchParams(window.location.search);
+    const join = params.get("join");
+    router.replace(join ? `/?join=${encodeURIComponent(join)}` : "/");
+  }, [ready, session, router]);
+
+  useEffect(() => {
+    if (!ready || !session) return;
     void refresh(circleId);
   }, [ready, session?.address]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -171,7 +187,7 @@ export default function AppPage() {
   const logout = () => {
     localStorage.removeItem(SESSION_KEY);
     setSession(null);
-    setNotice("Signed out");
+    router.replace("/");
   };
 
   const sendTx = useCallback(
@@ -218,7 +234,7 @@ export default function AppPage() {
     customGoal: string;
   }) => {
     if (!session) {
-      setError("Sign in first (alice/alice, bob/bob, or cara/cara)");
+      setError("Sign in first");
       return;
     }
     const stake = parseEther(stakeMon || "0.1");
@@ -340,11 +356,14 @@ export default function AppPage() {
 
   const copyInvite = async () => {
     if (circleId === null) return;
-    const url = `${window.location.origin}/app?join=${circleId.toString()}`;
-    await navigator.clipboard.writeText(url);
+    await navigator.clipboard.writeText(toInviteCode(circleId));
     setInviteCopied(true);
     setTimeout(() => setInviteCopied(false), 2000);
   };
+
+  if (!ready || !session) {
+    return null;
+  }
 
   return (
     <div className="app-shell">
@@ -358,11 +377,9 @@ export default function AppPage() {
           </a>
         </div>
         <div className="app-top-right">
-          {session && (
-            <div className="bal-chip">
-              {mon(walletBal, 3)} <small>MON</small>
-            </div>
-          )}
+          <div className="bal-chip">
+            {mon(walletBal, 3)} <small>MON</small>
+          </div>
           <button type="button" className="btn btn-ghost" onClick={() => refresh()} disabled={!!busy}>
             Refresh
           </button>
@@ -373,11 +390,6 @@ export default function AppPage() {
         </div>
       </header>
 
-      {!session && (
-        <div className="alert ok">
-          Sign in as <b>alice/alice</b>, <b>bob/bob</b>, or <b>cara/cara</b> — open each in a different browser to play as friends.
-        </div>
-      )}
       {error && <div className="alert err">{error}</div>}
       {notice && !error && <div className="alert ok">{notice}</div>}
 
@@ -385,22 +397,27 @@ export default function AppPage() {
         {phase === "none" ? (
           <div className="ongoing-empty">
             <h1>No challenge yet</h1>
-            <p>Sign in, create a challenge, then share the invite. Friends sign in on another browser and join.</p>
+            <p>Create a challenge, then share the invite. Friends sign in on another browser and join.</p>
             <div className="ongoing-empty-actions">
               <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
                 Create challenge
               </button>
               <div className="join-inline">
                 <input
+                  className="field-input"
                   value={joinId}
-                  onChange={(e) => setJoinId(e.target.value.replace(/\D/g, ""))}
-                  placeholder="Circle #"
+                  onChange={(e) => setJoinId(e.target.value.toUpperCase())}
+                  placeholder="Invite code"
                 />
                 <button
                   type="button"
                   className="btn btn-ghost"
                   disabled={!joinId || !!busy}
-                  onClick={() => joinCircle(BigInt(joinId))}
+                  onClick={() => {
+                    const id = fromInviteCode(joinId);
+                    if (id !== null) void joinCircle(id);
+                    else setError("Invalid invite code");
+                  }}
                 >
                   Join
                 </button>
@@ -480,7 +497,7 @@ export default function AppPage() {
                 </button>
               )}
               <button type="button" className="btn btn-ghost" onClick={copyInvite} disabled={circleId === null}>
-                {inviteCopied ? "Copied!" : "Copy invite link"}
+                {inviteCopied ? "Copied!" : "Copy invite code"}
               </button>
               {busy && <span className="busy-label">{busy}…</span>}
             </div>
@@ -503,48 +520,75 @@ export default function AppPage() {
       <div className="app-grid">
         <section className="panel friends-panel">
           <header className="panel-head">
-            <h2>Friends in circle</h2>
-            <span>alice · bob · cara across browsers</span>
+            <h2>Friends</h2>
+            <span>{board.length ? `${board.length} in circle` : "Invite"}</span>
           </header>
-          <div className="friends-list">
-            {board.length === 0 && <p className="dim">No one yet. Create a challenge and share the invite.</p>}
-            {board.map((m) => (
-              <div
-                key={m.addr}
-                className={`friend-row ${m.completer ? "ok" : phase !== "lobby" && phase !== "none" ? "risk" : ""}`}
-              >
-                <div>
-                  <strong>{nameOf(m.addr)}</strong>
-                  <a href={explorerAddress(m.addr)} target="_blank" rel="noreferrer" className="addr">
-                    {short(m.addr)}
-                  </a>
-                  <div className="flame">streak {m.stats.streak}</div>
+
+          <InviteFriends circleId={circleId} onJoin={joinCircle} busy={!!busy} />
+
+          <div className="friends-list" style={{ marginTop: "1rem" }}>
+            {FRIENDS.map((friend) => {
+              const addr = actorByName[friend.actor];
+              const member = addr
+                ? board.find((m) => m.addr.toLowerCase() === addr.toLowerCase())
+                : undefined;
+              const isYou = session.username === friend.username;
+
+              return (
+                <div
+                  key={friend.username}
+                  className={`friend-row ${member?.completer ? "ok" : member && phase !== "lobby" && phase !== "none" ? "risk" : ""}`}
+                >
+                  <div>
+                    <strong>
+                      {friend.displayName}
+                      {isYou ? " (you)" : ""}
+                    </strong>
+                    <p className="friend-code">
+                      {friend.username} / {friend.password}
+                    </p>
+                    {member && (
+                      <a href={explorerAddress(member.addr)} target="_blank" rel="noreferrer" className="addr">
+                        {short(member.addr)}
+                      </a>
+                    )}
+                    {member && <div className="flame">streak {member.stats.streak}</div>}
+                    {!member && <p className="dim friend-code-hint">Not in circle yet</p>}
+                  </div>
+                  <div className="friend-side">
+                    {member ? (
+                      <>
+                        {statusBadge(member, phase)}
+                        {phase === "focus" && address && member.addr.toLowerCase() !== address.toLowerCase() && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={!!busy}
+                            onClick={() => sendTx("nudge", [circleId!, member.addr]).then(() => refresh(circleId))}
+                          >
+                            Nudge
+                          </button>
+                        )}
+                        {phase === "challenge" && address && member.addr.toLowerCase() !== address.toLowerCase() && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={!!busy}
+                            onClick={() =>
+                              sendTx("challenge", [circleId!, member.addr], circle?.stake).then(() => refresh(circleId))
+                            }
+                          >
+                            Dispute
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <span className="badge waiting">available</span>
+                    )}
+                  </div>
                 </div>
-                <div className="friend-side">
-                  {statusBadge(m, phase)}
-                  {phase === "focus" && address && m.addr.toLowerCase() !== address.toLowerCase() && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      disabled={!!busy}
-                      onClick={() => sendTx("nudge", [circleId!, m.addr]).then(() => refresh(circleId))}
-                    >
-                      Nudge
-                    </button>
-                  )}
-                  {phase === "challenge" && address && m.addr.toLowerCase() !== address.toLowerCase() && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      disabled={!!busy}
-                      onClick={() => sendTx("challenge", [circleId!, m.addr], circle?.stake).then(() => refresh(circleId))}
-                    >
-                      Dispute
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
