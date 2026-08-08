@@ -6,8 +6,8 @@ export const SEED_CHALLENGES = [
     label: "Gym Streak",
     goal: "Gym Streak: workout photo before the deadline",
     stakeMon: "0.02",
-    roundSeconds: 20,
-    challengeSeconds: 15,
+    roundSeconds: 60,
+    challengeSeconds: 30,
   },
   {
     code: "JOBS3",
@@ -15,8 +15,8 @@ export const SEED_CHALLENGES = [
     label: "Job Hunt Sprint",
     goal: "Job Hunt Sprint: apply to 5 jobs; screenshot each sent email",
     stakeMon: "0.02",
-    roundSeconds: 20,
-    challengeSeconds: 15,
+    roundSeconds: 60,
+    challengeSeconds: 30,
   },
   {
     code: "CODE4",
@@ -24,8 +24,8 @@ export const SEED_CHALLENGES = [
     label: "LeetCode Daily",
     goal: "LeetCode Daily: one accepted submission",
     stakeMon: "0.02",
-    roundSeconds: 20,
-    challengeSeconds: 15,
+    roundSeconds: 60,
+    challengeSeconds: 30,
   },
 ] as const;
 

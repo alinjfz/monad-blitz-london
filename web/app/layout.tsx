@@ -27,14 +27,14 @@ export const metadata: Metadata = {
     title: "FocusBond: miss it, pay your friends",
     description:
       "Friend-group accountability circles on Monad. Stake MON on a shared goal; whoever misses pays the friends who showed up.",
-    images: [{ url: "/brand/hero.webp", width: 1600, height: 900, alt: "FocusBond" }],
+    images: [{ url: "/brand/og.png", width: 1280, height: 720, alt: "FocusBond — miss it, pay your friends" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "FocusBond: miss it, pay your friends",
     description:
       "Friend-group accountability circles on Monad. Stake MON on a shared goal; whoever misses pays the friends who showed up.",
-    images: ["/brand/hero.webp"],
+    images: ["/brand/og.png"],
   },
 };
 

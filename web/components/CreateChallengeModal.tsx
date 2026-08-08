@@ -22,6 +22,54 @@ type Props = {
   busy: boolean;
 };
 
+function TimerControl({
+  label,
+  value,
+  onChange,
+  step = 10,
+  min = 5,
+}: {
+  label: string;
+  value: number;
+  onChange: (n: number) => void;
+  step?: number;
+  min?: number;
+}) {
+  return (
+    <div className="timer-control">
+      <span className="timer-label">{label}</span>
+      <div className="timer-stepper">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm timer-btn"
+          aria-label={`Decrease ${label}`}
+          onClick={() => onChange(Math.max(min, value - step))}
+        >
+          −
+        </button>
+        <input
+          className="timer-input"
+          type="number"
+          min={min}
+          step={1}
+          value={value}
+          onChange={(e) => onChange(Math.max(min, Number(e.target.value) || min))}
+          aria-label={`${label} seconds`}
+        />
+        <span className="timer-unit">s</span>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm timer-btn"
+          aria-label={`Increase ${label}`}
+          onClick={() => onChange(value + step)}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function CreateChallengeModal({ open, onClose, onCreate, busy }: Props) {
   const titleId = useId();
   const [presetIdx, setPresetIdx] = useState(0);
@@ -76,8 +124,6 @@ export function CreateChallengeModal({ open, onClose, onCreate, busy }: Props) {
               onClick={() => {
                 setPresetIdx(i);
                 setStakeMon(p.stakeMon);
-                setRoundSeconds(p.round);
-                setChallengeSeconds(p.challenge);
               }}
             >
               <strong>{p.label}</strong>
@@ -98,43 +144,19 @@ export function CreateChallengeModal({ open, onClose, onCreate, busy }: Props) {
           placeholder={isCustom ? "e.g. Ship the landing page tonight" : preset.goal}
         />
 
-        <div className="time-fields">
-          <div className="time-field">
-            <label className="field-label" htmlFor="round-seconds">
-              Round time (seconds)
-            </label>
-            <input
-              id="round-seconds"
-              className="field-input"
-              type="number"
-              min={1}
-              step={1}
-              value={roundSeconds}
-              onChange={(e) => setRoundSeconds(Math.max(1, Number(e.target.value) || 1))}
-            />
-          </div>
-          <div className="time-field">
-            <label className="field-label" htmlFor="challenge-seconds">
-              Dispute window (seconds)
-            </label>
-            <input
-              id="challenge-seconds"
-              className="field-input"
-              type="number"
-              min={1}
-              step={1}
-              value={challengeSeconds}
-              onChange={(e) => setChallengeSeconds(Math.max(1, Number(e.target.value) || 1))}
-            />
-          </div>
+        <p className="field-label">Timer</p>
+        <div className="timer-fields">
+          <TimerControl label="Round" value={roundSeconds} onChange={setRoundSeconds} step={10} min={5} />
+          <TimerControl
+            label="Dispute window"
+            value={challengeSeconds}
+            onChange={setChallengeSeconds}
+            step={5}
+            min={5}
+          />
         </div>
 
         <StakeConverter mon={stakeMon} onMonChange={setStakeMon} />
-
-        <div className="modal-meta">
-          <span>Round {roundSeconds}s</span>
-          <span>Dispute window {challengeSeconds}s</span>
-        </div>
 
         <button
           type="button"
