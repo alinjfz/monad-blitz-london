@@ -49,15 +49,7 @@ export async function POST(req: Request) {
       if (txValue !== undefined && bal < txValue) {
         return NextResponse.json(
           {
-            error: `Not enough MON. Wallet has ${(Number(bal) / 1e18).toFixed(3)} MON but needs ${(Number(txValue) / 1e18).toFixed(3)} + gas. Fund from the faucet.`,
-          },
-          { status: 400 },
-        );
-      }
-      if (bal < 10n * 10n ** 18n && txValue !== undefined) {
-        return NextResponse.json(
-          {
-            error: `Monad reserve balance blocked this tx. ${actor} has ${(Number(bal) / 1e18).toFixed(3)} MON — fund to ~10+ MON (plus stake), then retry.`,
+            error: `Not enough MON. Wallet has ${(Number(bal) / 1e18).toFixed(3)} MON but needs ${(Number(txValue) / 1e18).toFixed(3)} + gas.`,
           },
           { status: 400 },
         );
@@ -79,8 +71,7 @@ export async function POST(req: Request) {
     if (receipt.status === "reverted") {
       return NextResponse.json(
         {
-          error:
-            "transaction reverted onchain — often low MON / Monad 10 MON reserve. Fund the friend wallet and retry.",
+          error: "transaction reverted onchain — check stake + gas vs wallet balance, then retry.",
         },
         { status: 500 },
       );

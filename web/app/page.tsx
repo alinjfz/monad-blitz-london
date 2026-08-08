@@ -1,11 +1,13 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { BrandMark } from "@/components/BrandMark";
 import { PhoneShowcase } from "@/components/PhoneShowcase";
 import { SignInButton } from "@/components/SignInButton";
-import { SESSION_KEY, type FriendSession } from "@/lib/friends";
+import { SESSION_KEY, friendByUsername, type FriendSession } from "@/lib/friends";
 
 const STEPS = [
   {
@@ -21,7 +23,7 @@ const STEPS = [
   {
     n: "03",
     title: "Everyone stakes",
-    body: "MON goes into escrow on Monad — not into our pocket. The contract cannot keep a single wei.",
+    body: "MON goes into escrow on Monad, not into our pocket. The contract cannot keep a single wei.",
   },
   {
     n: "04",
@@ -37,7 +39,7 @@ const STEPS = [
 
 const EXAMPLES = [
   { title: "30-Day Fitness", meta: "Daily · gym photo", stake: "$10" },
-  { title: "Finals Sprint", meta: "Mon–Fri · timelapse", stake: "$15" },
+  { title: "Finals Sprint", meta: "Mon-Fri · timelapse", stake: "$15" },
   { title: "Off TikTok", meta: "21 days · screen time", stake: "$10" },
   { title: "Job Hunt Sprint", meta: "Weekly · email screenshots", stake: "$20" },
 ];
@@ -70,8 +72,9 @@ export default function LandingPage() {
 
   const goApp = (s?: FriendSession) => {
     if (s) {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(s));
-      setSession(s);
+      const withCode = s.code ? s : { ...s, code: friendByUsername(s.username)?.code ?? "" };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(withCode));
+      setSession(withCode);
     }
     router.push(appHref());
   };
@@ -84,8 +87,8 @@ export default function LandingPage() {
   return (
     <div className="landing">
       <nav className="land-nav">
-        <Link href="/" className="brand">
-          Focus<span>Bond</span>
+        <Link href="/" className="brand-link">
+          <BrandMark />
         </Link>
         <div className="land-nav-links">
           <a href="#how">How it works</a>
@@ -110,7 +113,7 @@ export default function LandingPage() {
           </h1>
           <p className="hero-lede">
             Start a challenge with friends. Everyone stakes MON on a shared goal. Whoever misses has
-            their stake split among the people who showed up — the contract keeps nothing.
+            their stake split among the people who showed up. The contract keeps nothing.
           </p>
           <div className="hero-cta">
             {ready && session ? (
@@ -152,29 +155,42 @@ export default function LandingPage() {
       </section>
 
       <section className="land-section contrast" id="why">
-        <h2 className="land-h2">Why this one sticks</h2>
-        <div className="why-grid">
-          <article>
-            <h3>Real stakes, real friends</h3>
-            <p>
-              Like Nudge and Streek — but when someone misses, the money goes to the friends who
-              completed, not to the company.
-            </p>
-          </article>
-          <article>
-            <h3>Proof that counts</h3>
-            <p>
-              Forfeit-grade check-ins: submit photo proof, get a referee verdict, or face a bonded
-              peer challenge. No empty green checkmarks.
-            </p>
-          </article>
-          <article>
-            <h3>No house cut</h3>
-            <p>
-              Streek charges everyone and keeps it. Forfeit keeps the forfeit. FocusBond escrows the
-              group and drains to zero on every settle.
-            </p>
-          </article>
+        <div className="why-layout">
+          <div className="why-copy">
+            <h2 className="land-h2">Why this one sticks</h2>
+            <div className="why-grid">
+              <article>
+                <h3>Real stakes, real friends</h3>
+                <p>
+                  Like Nudge and Streek, but when someone misses, the money goes to the friends who
+                  completed, not to the company.
+                </p>
+              </article>
+              <article>
+                <h3>Proof that counts</h3>
+                <p>
+                  Forfeit-grade check-ins: submit photo proof, get a referee verdict, or face a bonded
+                  peer challenge. No empty green checkmarks.
+                </p>
+              </article>
+              <article>
+                <h3>No house cut</h3>
+                <p>
+                  Streek charges everyone and keeps it. Forfeit keeps the forfeit. FocusBond escrows the
+                  group and drains to zero on every settle.
+                </p>
+              </article>
+            </div>
+          </div>
+          <figure className="why-visual">
+            <Image
+              src="/brand/circle.webp"
+              alt="Friends bonded around an escrow circle"
+              width={900}
+              height={675}
+              sizes="(max-width: 900px) 90vw, 420px"
+            />
+          </figure>
         </div>
       </section>
 
@@ -192,21 +208,25 @@ export default function LandingPage() {
       </section>
 
       <section className="land-cta">
-        <h2>Don&apos;t break the circle.</h2>
-        <p>Sign in, grab testnet MON, and lock in with friends.</p>
-        {ready && session ? (
-          <Link href={appHref()} className="btn btn-primary btn-lg">
-            Enter FocusBond
-          </Link>
-        ) : (
-          <SignInButton session={session} onLogin={goApp} onLogout={logout} buttonLabel="Enter FocusBond" />
-        )}
+        <div className="land-cta-bg" aria-hidden>
+          <Image src="/brand/hero.webp" alt="" fill sizes="100vw" className="land-cta-img" />
+        </div>
+        <div className="land-cta-inner">
+          <BrandMark size={36} />
+          <h2>Don&apos;t break the circle.</h2>
+          <p>Sign in, grab testnet MON, and lock in with friends.</p>
+          {ready && session ? (
+            <Link href={appHref()} className="btn btn-primary btn-lg">
+              Enter FocusBond
+            </Link>
+          ) : (
+            <SignInButton session={session} onLogin={goApp} onLogout={logout} buttonLabel="Enter FocusBond" />
+          )}
+        </div>
       </section>
 
       <footer className="land-foot">
-        <span className="brand">
-          Focus<span>Bond</span>
-        </span>
+        <BrandMark size={24} />
         <span>Built at Monad Blitz London</span>
       </footer>
     </div>

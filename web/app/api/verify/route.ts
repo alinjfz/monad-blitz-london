@@ -123,14 +123,14 @@ function fallback(filename: string | undefined, why: string): Verdict {
   const source = "heuristic";
 
   if (/fake|cat|unrelated|random|meme|screenshot-of-nothing/.test(name)) {
-    return { pass: false, reason: `filename looks like fake evidence — ${why}`, source };
+    return { pass: false, reason: `filename looks like fake evidence: ${why}`, source };
   }
   if (/real|proof|application|commit|email|leetcode|gym|word-?count|receipt/.test(name)) {
-    return { pass: true, reason: `filename looks like genuine evidence — ${why}`, source };
+    return { pass: true, reason: `filename looks like genuine evidence: ${why}`, source };
   }
   return {
     pass: true,
-    reason: `accepted without inspecting the image — ${why}, so friends must police this one`,
+    reason: `accepted without inspecting the image (${why}), so friends must police this one`,
     source,
   };
 }

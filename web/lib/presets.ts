@@ -6,7 +6,7 @@ export const PRESETS = [
     proof: "Screenshot of your editor or terminal",
     round: 60,
     challenge: 30,
-    stakeMon: "0.3",
+    stakeMon: "0.02",
   },
   {
     id: "gym",
@@ -15,7 +15,7 @@ export const PRESETS = [
     proof: "Live gym photo",
     round: 120,
     challenge: 60,
-    stakeMon: "0.2",
+    stakeMon: "0.02",
   },
   {
     id: "jobs",
@@ -24,7 +24,7 @@ export const PRESETS = [
     proof: "Email screenshots",
     round: 120,
     challenge: 60,
-    stakeMon: "0.5",
+    stakeMon: "0.03",
   },
   {
     id: "leetcode",
@@ -33,7 +33,7 @@ export const PRESETS = [
     proof: "Accepted submission screenshot",
     round: 120,
     challenge: 60,
-    stakeMon: "0.2",
+    stakeMon: "0.02",
   },
   {
     id: "offtiktok",
@@ -42,7 +42,7 @@ export const PRESETS = [
     proof: "Screen time report",
     round: 120,
     challenge: 60,
-    stakeMon: "0.25",
+    stakeMon: "0.02",
   },
   {
     id: "thesis",
@@ -51,7 +51,7 @@ export const PRESETS = [
     proof: "Word count screenshot",
     round: 180,
     challenge: 60,
-    stakeMon: "0.4",
+    stakeMon: "0.03",
   },
 ] as const;
 

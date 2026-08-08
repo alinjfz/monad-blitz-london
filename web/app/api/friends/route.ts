@@ -1,10 +1,23 @@
 import { NextResponse } from "next/server";
-import { friendByCode, friendByUsername, FRIENDS } from "@/lib/friends";
+import { friendByCode, friendByUsername, SEED_FRIENDSHIPS } from "@/lib/friends";
 
 /** In-memory mutual friend links for the demo (resets on server restart). */
 const links = new Map<string, Set<string>>();
+let seeded = false;
+
+function ensureSeeded() {
+  if (seeded) return;
+  seeded = true;
+  for (const [a, b] of SEED_FRIENDSHIPS) {
+    if (!links.has(a)) links.set(a, new Set());
+    if (!links.has(b)) links.set(b, new Set());
+    links.get(a)!.add(b);
+    links.get(b)!.add(a);
+  }
+}
 
 function listFor(username: string) {
+  ensureSeeded();
   const set = links.get(username.toLowerCase()) ?? new Set<string>();
   return [...set]
     .map((u) => friendByUsername(u))
@@ -22,11 +35,16 @@ export async function GET(req: Request) {
   if (!user || !friendByUsername(user)) {
     return NextResponse.json({ error: "unknown user" }, { status: 400 });
   }
-  return NextResponse.json({ friends: listFor(user) });
+  const me = friendByUsername(user)!;
+  return NextResponse.json({
+    friends: listFor(user),
+    me: { username: me.username, displayName: me.displayName, code: me.code },
+  });
 }
 
 export async function POST(req: Request) {
   try {
+    ensureSeeded();
     const body = await req.json();
     const me = String(body.username ?? "").trim().toLowerCase();
     const code = String(body.code ?? "");
@@ -48,7 +66,11 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       friends: listFor(me),
-      added: { username: other.username, displayName: other.displayName, code: other.code },
+      added: {
+        username: other.username,
+        displayName: other.displayName,
+        code: other.code,
+      },
     });
   } catch (err) {
     return NextResponse.json(
@@ -57,17 +79,3 @@ export async function POST(req: Request) {
     );
   }
 }
-
-export async function DELETE(req: Request) {
-  const user = new URL(req.url).searchParams.get("user")?.trim().toLowerCase();
-  const other = new URL(req.url).searchParams.get("other")?.trim().toLowerCase();
-  if (!user || !other) {
-    return NextResponse.json({ error: "user and other required" }, { status: 400 });
-  }
-  links.get(user)?.delete(other);
-  links.get(other)?.delete(user);
-  return NextResponse.json({ friends: listFor(user) });
-}
-
-// silence unused in edge cases
-void FRIENDS;

@@ -33,9 +33,16 @@ export type FriendSession = {
   displayName: string;
   actor: Actor;
   address: string;
+  code: string;
 };
 
 export const SESSION_KEY = "focusbond:friend";
+
+/** Seeded mutual friendships for the demo. */
+export const SEED_FRIENDSHIPS: [string, string][] = [
+  ["alice", "bob"],
+  ["bob", "cara"],
+];
 
 export function findFriend(username: string, password: string) {
   const u = username.trim().toLowerCase();

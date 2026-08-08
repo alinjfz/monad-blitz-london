@@ -15,6 +15,7 @@ export async function POST(req: Request) {
       displayName: friend.displayName,
       actor: friend.actor,
       address: account.address,
+      code: friend.code,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

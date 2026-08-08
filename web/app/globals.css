@@ -58,6 +58,37 @@ select {
   color: var(--accent);
 }
 
+.brand-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  color: inherit;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.brand-mark-icon {
+  border-radius: 8px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 0 rgba(20, 17, 15, 0.06);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -283,10 +314,30 @@ select {
   color: var(--ink-soft);
 }
 
+.why-layout {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 2.5rem;
+  align-items: center;
+}
+
+.why-visual {
+  margin: 0;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid #3a342e;
+}
+
+.why-visual img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .why-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.5rem;
+  grid-template-columns: 1fr;
+  gap: 0.25rem;
 }
 
 .why-grid article {
@@ -335,14 +386,51 @@ select {
 }
 
 .land-cta {
+  position: relative;
   margin: 2rem 5vw 4rem;
-  padding: 3.5rem 5vw;
+  padding: 0;
   border-radius: 28px;
-  background:
-    linear-gradient(135deg, rgba(232, 93, 4, 0.12), transparent 50%),
-    var(--ink);
+  overflow: hidden;
+  background: var(--ink);
   color: var(--bg);
   text-align: center;
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+}
+
+.land-cta-bg {
+  position: absolute;
+  inset: 0;
+}
+
+.land-cta-img {
+  object-fit: cover;
+  object-position: center;
+  opacity: 0.38;
+  filter: saturate(0.85) contrast(1.05);
+}
+
+.land-cta-inner {
+  position: relative;
+  z-index: 1;
+  padding: 3.5rem 5vw;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  background: linear-gradient(180deg, rgba(20, 17, 15, 0.55), rgba(20, 17, 15, 0.82));
+  width: 100%;
+  min-height: 320px;
+  justify-content: center;
+}
+
+.land-cta-inner .brand-mark {
+  margin-bottom: 0.75rem;
+}
+
+.land-cta-inner .brand {
+  color: var(--bg);
 }
 
 .land-cta h2 {
@@ -782,6 +870,29 @@ select {
   display: grid;
   grid-template-columns: 1.15fr 0.85fr;
   gap: 1.15rem;
+  align-items: start;
+}
+
+.app-stack {
+  display: grid;
+  gap: 1.15rem;
+  align-content: start;
+}
+
+.invite-empty-challenge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.invite-empty-challenge .dim {
+  margin: 0;
+}
+
+.challenge-members {
+  margin-top: 0.25rem;
 }
 
 .panel {
@@ -791,11 +902,53 @@ select {
   padding: 1.15rem 1.2rem;
 }
 
+.collapsible-panel.is-closed {
+  padding-bottom: 0.95rem;
+}
+
+.collapsible-panel.is-closed .panel-head {
+  margin-bottom: 0;
+}
+
+.panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+
+.panel-toggle h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+.panel-toggle-caret {
+  display: inline-flex;
+  width: 1rem;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.panel-head-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
 .panel-head {
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
-  align-items: baseline;
+  align-items: center;
   margin-bottom: 1rem;
 }
 
@@ -804,6 +957,17 @@ select {
   font-family: var(--font-display);
   font-size: 1.15rem;
   letter-spacing: -0.02em;
+}
+
+.activity-panel {
+  align-self: start;
+  width: 100%;
+  min-width: 0;
+}
+
+.activity-panel .feed {
+  max-height: 280px;
+  overflow-y: auto;
 }
 
 .panel-head span,
@@ -991,7 +1155,7 @@ select {
 }
 
 .feed {
-  max-height: 420px;
+  max-height: 280px;
   overflow-y: auto;
   font-size: 0.88rem;
 }
@@ -1237,6 +1401,28 @@ select {
   color: var(--muted);
 }
 
+.seed-list {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+}
+
+.seed-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.seed-meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+}
+
 @media (max-width: 560px) {
   .invite-share {
     flex-direction: column;
@@ -1445,6 +1631,7 @@ select {
     min-height: 480px;
   }
 
+  .why-layout,
   .why-grid,
   .ex-grid,
   .app-grid,
