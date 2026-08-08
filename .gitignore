@@ -1,0 +1,14 @@
+.env
+.env.local
+*.key
+
+node_modules/
+.next/
+out/
+dist/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/lib/
+
+.DS_Store
