@@ -9,7 +9,7 @@ import { InviteFriends, fromInviteCode, toInviteCode } from "@/components/Invite
 import { SignInButton } from "@/components/SignInButton";
 import { explorerAddress, explorerTx, FAUCET_URL } from "@/lib/chain";
 import { fmtClock, mon, phaseLabel, short, ZERO, ZERO_HASH } from "@/lib/format";
-import { SESSION_KEY, FRIENDS, type FriendSession } from "@/lib/friends";
+import { SESSION_KEY, type FriendSession } from "@/lib/friends";
 import type { Circle, FeedItem, MemberView, Phase, Verdict } from "@/lib/types";
 import type { Preset } from "@/lib/presets";
 
@@ -35,7 +35,6 @@ export default function AppPage() {
   const router = useRouter();
   const [session, setSession] = useState<FriendSession | null>(null);
   const [actorMap, setActorMap] = useState<Record<string, string>>({});
-  const [actorByName, setActorByName] = useState<Record<string, string>>({});
   const [circleId, setCircleId] = useState<bigint | null>(null);
   const [joinId, setJoinId] = useState("");
   const [circle, setCircle] = useState<Circle | null>(null);
@@ -145,14 +144,10 @@ export default function AppPage() {
       .then((r) => r.json())
       .then((actors: Record<string, string>) => {
         const map: Record<string, string> = {};
-        const byName: Record<string, string> = {};
         for (const [name, addr] of Object.entries(actors)) {
-          if (!addr) continue;
-          map[addr.toLowerCase()] = name.charAt(0) + name.slice(1).toLowerCase();
-          byName[name.toUpperCase()] = addr;
+          if (addr) map[addr.toLowerCase()] = name.charAt(0) + name.slice(1).toLowerCase();
         }
         setActorMap(map);
-        setActorByName(byName);
       })
       .catch(() => undefined);
   }, []);
@@ -238,8 +233,13 @@ export default function AppPage() {
       return;
     }
     const stake = parseEther(stakeMon || "0.1");
-    if (walletBal > 0n && stake > walletBal) {
-      setError(`Not enough MON. Need ${stakeMon}, have ${mon(walletBal, 3)}. Fund the friend wallet.`);
+    // Monad reserve balance: EOAs under ~10 MON cannot reduce their balance except via an emptying tx.
+    const reserve = parseEther("10");
+    const need = stake + reserve;
+    if (walletBal < need) {
+      setError(
+        `Need ~${mon(need, 2)} MON (10 MON Monad reserve + ${stakeMon} stake). You have ${mon(walletBal, 3)}. Fund the friend wallet from the faucet, then retry.`,
+      );
       return;
     }
     const goal = `${preset.label}: ${customGoal.trim() || preset.goal}`;
@@ -279,6 +279,13 @@ export default function AppPage() {
     const stake = BigInt(body.circle.stake);
     if (stake === 0n) {
       setError(`Circle #${id.toString()} is empty`);
+      return;
+    }
+    const reserve = parseEther("10");
+    if (walletBal < stake + reserve) {
+      setError(
+        `Need ~${mon(stake + reserve, 2)} MON to join (10 MON reserve + stake). You have ${mon(walletBal, 3)}. Fund the friend wallet.`,
+      );
       return;
     }
     const result = await sendTx("join", [id], stake);
@@ -524,71 +531,55 @@ export default function AppPage() {
             <span>{board.length ? `${board.length} in circle` : "Invite"}</span>
           </header>
 
-          <InviteFriends circleId={circleId} onJoin={joinCircle} busy={!!busy} />
+          <InviteFriends
+            username={session.username}
+            circleId={circleId}
+            challengeCode={circleId !== null ? toInviteCode(circleId) : null}
+            onJoinChallenge={joinCircle}
+            busy={!!busy}
+          />
 
           <div className="friends-list" style={{ marginTop: "1rem" }}>
-            {FRIENDS.map((friend) => {
-              const addr = actorByName[friend.actor];
-              const member = addr
-                ? board.find((m) => m.addr.toLowerCase() === addr.toLowerCase())
-                : undefined;
-              const isYou = session.username === friend.username;
-
-              return (
-                <div
-                  key={friend.username}
-                  className={`friend-row ${member?.completer ? "ok" : member && phase !== "lobby" && phase !== "none" ? "risk" : ""}`}
-                >
-                  <div>
-                    <strong>
-                      {friend.displayName}
-                      {isYou ? " (you)" : ""}
-                    </strong>
-                    <p className="friend-code">
-                      {friend.username} / {friend.password}
-                    </p>
-                    {member && (
-                      <a href={explorerAddress(member.addr)} target="_blank" rel="noreferrer" className="addr">
-                        {short(member.addr)}
-                      </a>
-                    )}
-                    {member && <div className="flame">streak {member.stats.streak}</div>}
-                    {!member && <p className="dim friend-code-hint">Not in circle yet</p>}
-                  </div>
-                  <div className="friend-side">
-                    {member ? (
-                      <>
-                        {statusBadge(member, phase)}
-                        {phase === "focus" && address && member.addr.toLowerCase() !== address.toLowerCase() && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            disabled={!!busy}
-                            onClick={() => sendTx("nudge", [circleId!, member.addr]).then(() => refresh(circleId))}
-                          >
-                            Nudge
-                          </button>
-                        )}
-                        {phase === "challenge" && address && member.addr.toLowerCase() !== address.toLowerCase() && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            disabled={!!busy}
-                            onClick={() =>
-                              sendTx("challenge", [circleId!, member.addr], circle?.stake).then(() => refresh(circleId))
-                            }
-                          >
-                            Dispute
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                      <span className="badge waiting">available</span>
-                    )}
-                  </div>
+            {board.length === 0 && (
+              <p className="dim">Challenge members show up here after they join with the challenge code.</p>
+            )}
+            {board.map((m) => (
+              <div
+                key={m.addr}
+                className={`friend-row ${m.completer ? "ok" : phase !== "lobby" && phase !== "none" ? "risk" : ""}`}
+              >
+                <div>
+                  <strong>{nameOf(m.addr)}</strong>
+                  <a href={explorerAddress(m.addr)} target="_blank" rel="noreferrer" className="addr">
+                    {short(m.addr)}
+                  </a>
+                  <div className="flame">streak {m.stats.streak}</div>
                 </div>
-              );
-            })}
+                <div className="friend-side">
+                  {statusBadge(m, phase)}
+                  {phase === "focus" && address && m.addr.toLowerCase() !== address.toLowerCase() && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={!!busy}
+                      onClick={() => sendTx("nudge", [circleId!, m.addr]).then(() => refresh(circleId))}
+                    >
+                      Nudge
+                    </button>
+                  )}
+                  {phase === "challenge" && address && m.addr.toLowerCase() !== address.toLowerCase() && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={!!busy}
+                      onClick={() => sendTx("challenge", [circleId!, m.addr], circle?.stake).then(() => refresh(circleId))}
+                    >
+                      Dispute
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
