@@ -13,6 +13,7 @@ import { SignInButton } from "@/components/SignInButton";
 import { explorerAddress, explorerTx, FAUCET_URL } from "@/lib/chain";
 import { fmtClock, mon, phaseLabel, short, ZERO, ZERO_HASH } from "@/lib/format";
 import { SESSION_KEY, friendByUsername, type FriendSession } from "@/lib/friends";
+import { isRpcNoise, friendlyRpcError } from "@/lib/rpc";
 import type { Circle, FeedItem, MemberView, Phase, Verdict } from "@/lib/types";
 import type { Preset } from "@/lib/presets";
 
@@ -130,7 +131,9 @@ export default function AppPage() {
       setError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (!/15\/sec|rate|limited|429/i.test(message)) setError(message);
+      // Public RPC rate-limits / flakes — never scare the demo UI.
+      if (isRpcNoise(message)) return;
+      setError(friendlyRpcError(err, "Couldn’t refresh — try again."));
     }
   }, [address, circleId]);
 
@@ -224,7 +227,8 @@ export default function AppPage() {
         setNotice(`${fn} confirmed`);
         return body as { hash: Hex; circleId?: string };
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        setError(isRpcNoise(message) ? "Network busy — tap again in a second." : friendlyRpcError(err));
         return null;
       } finally {
         setBusy(null);

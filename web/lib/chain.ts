@@ -19,9 +19,9 @@ export const publicClient = createPublicClient({
   chain: monadTestnet,
   transport: http(rpcUrl, {
     batch: true,
-    retryCount: 2,
-    retryDelay: 1000,
-    timeout: 20_000,
+    retryCount: 3,
+    retryDelay: 800,
+    timeout: 25_000,
   }),
 });
 

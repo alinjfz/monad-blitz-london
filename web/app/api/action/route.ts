@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { decodeEventLog, encodeFunctionData, type Abi } from "viem";
 import { focusBondAddress, publicClient } from "@/lib/chain";
 import { focusBondAbi } from "@/lib/abi";
+import { friendlyRpcError, isRpcNoise, withRpcRetry } from "@/lib/rpc";
 import { actorWallet } from "@/lib/server";
 
 const GAS_LIMIT: Record<string, bigint> = {
@@ -37,41 +38,59 @@ export async function POST(req: Request) {
     const txValue = value ? BigInt(value) : undefined;
 
     try {
-      await publicClient.call({
-        account: wallet.account.address,
-        to: focusBondAddress,
-        data,
-        value: txValue,
-      });
+      await withRpcRetry(() =>
+        publicClient.call({
+          account: wallet.account.address,
+          to: focusBondAddress,
+          data,
+          value: txValue,
+        }),
+      );
     } catch (simErr) {
       const raw = simErr instanceof Error ? simErr.message : String(simErr);
-      const bal = await publicClient.getBalance({ address: wallet.account.address });
-      if (txValue !== undefined && bal < txValue) {
+      if (isRpcNoise(raw)) {
         return NextResponse.json(
-          {
-            error: `Not enough MON. Wallet has ${(Number(bal) / 1e18).toFixed(3)} MON but needs ${(Number(txValue) / 1e18).toFixed(3)} + gas.`,
-          },
-          { status: 400 },
+          { error: "Network busy — tap again in a second." },
+          { status: 503 },
         );
       }
+      try {
+        const bal = await withRpcRetry(() =>
+          publicClient.getBalance({ address: wallet.account.address }),
+        );
+        if (txValue !== undefined && bal < txValue) {
+          return NextResponse.json(
+            {
+              error: `Not enough MON. Wallet has ${(Number(bal) / 1e18).toFixed(3)} MON but needs ${(Number(txValue) / 1e18).toFixed(3)} + gas.`,
+            },
+            { status: 400 },
+          );
+        }
+      } catch {
+        /* ignore balance lookup noise */
+      }
       return NextResponse.json(
-        { error: raw.split("\n")[0].slice(0, 220) || "simulation failed" },
+        { error: friendlyRpcError(simErr, "Couldn’t simulate that transaction.") },
         { status: 400 },
       );
     }
 
-    const hash = await wallet.sendTransaction({
-      to: focusBondAddress,
-      data,
-      value: txValue,
-      gas: GAS_LIMIT[fn],
-    });
+    const hash = await withRpcRetry(() =>
+      wallet.sendTransaction({
+        to: focusBondAddress,
+        data,
+        value: txValue,
+        gas: GAS_LIMIT[fn],
+      }),
+    );
 
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await withRpcRetry(() =>
+      publicClient.waitForTransactionReceipt({ hash }),
+    );
     if (receipt.status === "reverted") {
       return NextResponse.json(
         {
-          error: "transaction reverted onchain — check stake + gas vs wallet balance, then retry.",
+          error: "Transaction reverted — check stake + gas vs wallet balance, then retry.",
         },
         { status: 500 },
       );
@@ -92,15 +111,23 @@ export async function POST(req: Request) {
       }
     }
 
+    let balance: string | undefined;
+    try {
+      balance = (
+        await withRpcRetry(() => publicClient.getBalance({ address: wallet.account.address }))
+      ).toString();
+    } catch {
+      /* optional */
+    }
+
     return NextResponse.json({
       hash,
       status: receipt.status,
       circleId: circleId || undefined,
-      balance: (await publicClient.getBalance({ address: wallet.account.address })).toString(),
+      balance,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message.split("\n")[0] }, { status: 500 });
+    return NextResponse.json({ error: friendlyRpcError(err) }, { status: 503 });
   }
 }
 

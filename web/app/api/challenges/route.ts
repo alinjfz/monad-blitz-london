@@ -8,6 +8,7 @@ import {
 import { focusBondAbi } from "@/lib/abi";
 import { focusBondAddress, publicClient } from "@/lib/chain";
 import { friendByUsername } from "@/lib/friends";
+import { friendlyRpcError, withRpcRetry } from "@/lib/rpc";
 import { SEED_CHALLENGES, seedByCode } from "@/lib/seed-challenges";
 import { actorWallet } from "@/lib/server";
 
@@ -23,12 +24,14 @@ async function ensureSeed(code: string) {
   const existing = circleByCode.get(seed.code);
   if (existing) {
     try {
-      const raw = await publicClient.readContract({
-        address: focusBondAddress,
-        abi: focusBondAbi,
-        functionName: "getCircle",
-        args: [BigInt(existing)],
-      });
+      const raw = await withRpcRetry(() =>
+        publicClient.readContract({
+          address: focusBondAddress,
+          abi: focusBondAbi,
+          functionName: "getCircle",
+          args: [BigInt(existing)],
+        }),
+      );
       const c = raw as readonly unknown[];
       const stake = c[0] as bigint;
       const settled = c[6] as boolean;
@@ -46,7 +49,12 @@ async function ensureSeed(code: string) {
 
   const wallet = actorWallet(host.actor);
   const stake = parseEther(seed.stakeMon);
-  const bal = await publicClient.getBalance({ address: wallet.account.address });
+  let bal: bigint;
+  try {
+    bal = await withRpcRetry(() => publicClient.getBalance({ address: wallet.account.address }));
+  } catch {
+    return { seed, error: "Network busy — tap Open again in a second." };
+  }
   // Stake + small gas buffer — undelegated demo wallets can empty below 10 MON.
   if (bal < stake + parseEther("0.05")) {
     return {
@@ -61,32 +69,38 @@ async function ensureSeed(code: string) {
     args: [stake, seed.goal, BigInt(seed.roundSeconds), BigInt(seed.challengeSeconds)],
   });
 
-  const hash = await wallet.sendTransaction({
-    to: focusBondAddress,
-    data,
-    value: stake,
-    gas: CREATE_GAS,
-  });
-  const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  if (receipt.status === "reverted") {
-    return { seed, error: `failed to open ${seed.code} onchain` };
-  }
-
-  let circleId: string | undefined;
-  for (const log of receipt.logs) {
-    try {
-      const ev = decodeEventLog({ abi: focusBondAbi, data: log.data, topics: log.topics });
-      if (ev.eventName === "CircleCreated") {
-        circleId = String((ev.args as { id: bigint }).id);
-      }
-    } catch {
-      /* skip */
+  try {
+    const hash = await withRpcRetry(() =>
+      wallet.sendTransaction({
+        to: focusBondAddress,
+        data,
+        value: stake,
+        gas: CREATE_GAS,
+      }),
+    );
+    const receipt = await withRpcRetry(() => publicClient.waitForTransactionReceipt({ hash }));
+    if (receipt.status === "reverted") {
+      return { seed, error: `failed to open ${seed.code} onchain` };
     }
-  }
-  if (!circleId) return { seed, error: "created but no circle id in receipt" };
 
-  circleByCode.set(seed.code, circleId);
-  return { seed, circleId, hash };
+    let circleId: string | undefined;
+    for (const log of receipt.logs) {
+      try {
+        const ev = decodeEventLog({ abi: focusBondAbi, data: log.data, topics: log.topics });
+        if (ev.eventName === "CircleCreated") {
+          circleId = String((ev.args as { id: bigint }).id);
+        }
+      } catch {
+        /* skip */
+      }
+    }
+    if (!circleId) return { seed, error: "created but no circle id in receipt" };
+
+    circleByCode.set(seed.code, circleId);
+    return { seed, circleId, hash };
+  } catch (err) {
+    return { seed, error: friendlyRpcError(err) };
+  }
 }
 
 async function describe(code: string, circleId: string | undefined) {
@@ -106,12 +120,14 @@ async function describe(code: string, circleId: string | undefined) {
   };
   if (!circleId) return base;
   try {
-    const raw = await publicClient.readContract({
-      address: focusBondAddress,
-      abi: focusBondAbi,
-      functionName: "getCircle",
-      args: [BigInt(circleId)],
-    });
+    const raw = await withRpcRetry(() =>
+      publicClient.readContract({
+        address: focusBondAddress,
+        abi: focusBondAbi,
+        functionName: "getCircle",
+        args: [BigInt(circleId)],
+      }),
+    );
     const c = raw as readonly unknown[];
     const stake = c[0] as bigint;
     const settled = c[6] as boolean;
@@ -128,18 +144,11 @@ async function describe(code: string, circleId: string | undefined) {
 }
 
 export async function GET() {
-  try {
-    const challenges = [];
-    for (const seed of SEED_CHALLENGES) {
-      challenges.push(await describe(seed.code, circleByCode.get(seed.code)));
-    }
-    return NextResponse.json({ challenges });
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
-    );
+  const challenges = [];
+  for (const seed of SEED_CHALLENGES) {
+    challenges.push(await describe(seed.code, circleByCode.get(seed.code)));
   }
+  return NextResponse.json({ challenges });
 }
 
 export async function POST(req: Request) {
@@ -178,7 +187,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ error: "unknown action" }, { status: 400 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message.split("\n")[0] }, { status: 500 });
+    return NextResponse.json({ error: friendlyRpcError(err) }, { status: 503 });
   }
 }
