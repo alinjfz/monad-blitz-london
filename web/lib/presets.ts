@@ -1,0 +1,58 @@
+export const PRESETS = [
+  {
+    id: "blitz",
+    label: "Blitz Lock-In",
+    goal: "60 minutes heads-down building",
+    proof: "Screenshot of your editor or terminal",
+    round: 60,
+    challenge: 30,
+    stakeMon: "0.3",
+  },
+  {
+    id: "gym",
+    label: "Gym Streak",
+    goal: "Workout photo before the deadline",
+    proof: "Live gym photo",
+    round: 120,
+    challenge: 60,
+    stakeMon: "0.2",
+  },
+  {
+    id: "jobs",
+    label: "Job Hunt Sprint",
+    goal: "Apply to 5 jobs — screenshot each sent email",
+    proof: "Email screenshots",
+    round: 120,
+    challenge: 60,
+    stakeMon: "0.5",
+  },
+  {
+    id: "leetcode",
+    label: "LeetCode Daily",
+    goal: "One accepted submission",
+    proof: "Accepted submission screenshot",
+    round: 120,
+    challenge: 60,
+    stakeMon: "0.2",
+  },
+  {
+    id: "offtiktok",
+    label: "Off TikTok",
+    goal: "Under 30 minutes of short-form video",
+    proof: "Screen time report",
+    round: 120,
+    challenge: 60,
+    stakeMon: "0.25",
+  },
+  {
+    id: "thesis",
+    label: "Thesis Hours",
+    goal: "Two hours of writing — screenshot the word count",
+    proof: "Word count screenshot",
+    round: 180,
+    challenge: 60,
+    stakeMon: "0.4",
+  },
+] as const;
+
+export type Preset = (typeof PRESETS)[number];
