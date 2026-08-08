@@ -81,7 +81,7 @@ export function StakeConverter({ mon, onMonChange }: Props) {
         </div>
       </div>
       <p className="stake-rate">
-        {loading ? "Fetching rate…" : `1 MON ≈ $${usdPerMon.toFixed(4)}`}
+        {loading ? "Fetching rate…" : `1 MON ≈ $${usdPerMon.toFixed(4)} · no app fee`}
       </p>
     </div>
   );

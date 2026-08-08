@@ -12,13 +12,34 @@ import { ChallengePanel } from "@/components/ChallengePanel";
 import { SignInButton } from "@/components/SignInButton";
 import { explorerAddress, explorerTx, FAUCET_URL } from "@/lib/chain";
 import { fmtClock, mon, phaseLabel, short, ZERO, ZERO_HASH } from "@/lib/format";
-import { FRIENDS, SESSION_KEY, friendByUsername, type FriendSession } from "@/lib/friends";
+import { SESSION_KEY, friendByUsername, type FriendSession } from "@/lib/friends";
 import { isRpcNoise, friendlyRpcError } from "@/lib/rpc";
 import type { Circle, FeedItem, MemberView, Phase, Verdict } from "@/lib/types";
 import type { Preset } from "@/lib/presets";
-import type { Actor } from "@/lib/chain";
 
 const CIRCLE_KEY = "focusbond:circleId";
+
+type ClockAnchor = {
+  endsAt: bigint;
+  challengeEndsAt: bigint;
+  focusDeadlineMs: number;
+  challengeDeadlineMs: number;
+};
+
+function sameCircle(a: Circle, b: Circle) {
+  return (
+    a.stake === b.stake &&
+    a.goal === b.goal &&
+    a.roundSeconds === b.roundSeconds &&
+    a.challengeSeconds === b.challengeSeconds &&
+    a.endsAt === b.endsAt &&
+    a.challengeEndsAt === b.challengeEndsAt &&
+    a.settled === b.settled &&
+    a.escrow === b.escrow &&
+    a.members.length === b.members.length &&
+    a.members.every((m, i) => m.toLowerCase() === b.members[i]?.toLowerCase())
+  );
+}
 
 function loadSession(): FriendSession | null {
   if (typeof window === "undefined") return null;
@@ -51,7 +72,7 @@ export default function AppPage() {
   const [circle, setCircle] = useState<Circle | null>(null);
   const [board, setBoard] = useState<MemberView[]>([]);
   const [walletBal, setWalletBal] = useState<bigint>(0n);
-  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const [tick, setTick] = useState(0);
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [verdicts, setVerdicts] = useState<Record<string, Verdict>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -61,6 +82,7 @@ export default function AppPage() {
   const [inviteCopied, setInviteCopied] = useState(false);
   const [ready, setReady] = useState(false);
   const autoSettleRef = useRef<string | null>(null);
+  const clockAnchorRef = useRef<ClockAnchor | null>(null);
 
   const address = session?.address as Hex | undefined;
 
@@ -101,18 +123,34 @@ export default function AppPage() {
           setCircle(null);
           setBoard([]);
           setActiveCircle(null);
+          clockAnchorRef.current = null;
         } else {
-          setCircle(next);
-          setBoard(
-            (body.board as MemberView[]).map((m) => ({
-              ...m,
-              stats: {
-                ...m.stats,
-                earned: BigInt(String(m.stats.earned)),
-                lost: BigInt(String(m.stats.lost)),
-              },
-            })),
-          );
+          setCircle((prev) => (prev && sameCircle(prev, next) ? prev : next));
+          const nextBoard = (body.board as MemberView[]).map((m) => ({
+            ...m,
+            stats: {
+              ...m.stats,
+              earned: BigInt(String(m.stats.earned)),
+              lost: BigInt(String(m.stats.lost)),
+            },
+          }));
+          setBoard((prev) => {
+            if (
+              prev.length === nextBoard.length &&
+              prev.every(
+                (p, i) =>
+                  p.addr === nextBoard[i]?.addr &&
+                  p.proofHash === nextBoard[i]?.proofHash &&
+                  p.broke === nextBoard[i]?.broke &&
+                  p.verified === nextBoard[i]?.verified &&
+                  p.failedByAI === nextBoard[i]?.failedByAI &&
+                  p.completer === nextBoard[i]?.completer,
+              )
+            ) {
+              return prev;
+            }
+            return nextBoard;
+          });
         }
       } else if (id === null) {
         setCircle(null);
@@ -128,7 +166,15 @@ export default function AppPage() {
             hash: f.hash,
           }),
         );
-        setFeed(next);
+        setFeed((prev) => {
+          if (
+            prev.length === next.length &&
+            prev.every((p, i) => p.key === next[i]?.key && p.hash === next[i]?.hash)
+          ) {
+            return prev;
+          }
+          return next;
+        });
         try {
           localStorage.setItem("focusbond:feed", JSON.stringify(next));
         } catch {
@@ -145,10 +191,35 @@ export default function AppPage() {
     }
   }, [address, circleId]);
 
+  // Smooth local tick — one clock, no chain-time jitter every second.
   useEffect(() => {
-    const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    const t = setInterval(() => setTick((n) => n + 1), 250);
     return () => clearInterval(t);
   }, []);
+
+  // Anchor countdown once per round start so refresh doesn't jump the display.
+  useEffect(() => {
+    if (!circle || circle.endsAt === 0n || circle.settled) {
+      clockAnchorRef.current = null;
+      return;
+    }
+    const prev = clockAnchorRef.current;
+    if (
+      prev &&
+      prev.endsAt === circle.endsAt &&
+      prev.challengeEndsAt === circle.challengeEndsAt
+    ) {
+      return;
+    }
+    const wallSec = Math.floor(Date.now() / 1000);
+    clockAnchorRef.current = {
+      endsAt: circle.endsAt,
+      challengeEndsAt: circle.challengeEndsAt,
+      focusDeadlineMs: Date.now() + Math.max(0, Number(circle.endsAt) - wallSec) * 1000,
+      challengeDeadlineMs:
+        Date.now() + Math.max(0, Number(circle.challengeEndsAt) - wallSec) * 1000,
+    };
+  }, [circle]);
 
   useEffect(() => {
     const s = loadSession();
@@ -238,7 +309,7 @@ export default function AppPage() {
         const body = await res.json();
         if (!res.ok) throw new Error(body.error ?? "transaction failed");
         if (body.balance) setWalletBal(BigInt(body.balance));
-        setNotice(`${fn} confirmed`);
+        if (fn !== "settle") setNotice(`${fn} confirmed`);
         return body as { hash: Hex; circleId?: string };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -268,12 +339,12 @@ export default function AppPage() {
       setError("Sign in first");
       return;
     }
-    const stake = parseEther(stakeMon || "0.02");
-    // Gas is charged on the limit on Monad — leave a small buffer above stake.
-    const gasBuffer = parseEther("0.05");
+    const stake = parseEther(stakeMon || "0.01");
+    // Network gas only — the contract takes no fee / house cut.
+    const gasBuffer = parseEther("0.01");
     if (walletBal < stake + gasBuffer) {
       setError(
-        `Not enough MON. Need ~${mon(stake + gasBuffer, 3)} (stake ${stakeMon} + gas). You have ${mon(walletBal, 3)}.`,
+        `Not enough MON. Need ~${mon(stake + gasBuffer, 3)} (stake ${stakeMon} + network gas). You have ${mon(walletBal, 3)}.`,
       );
       return;
     }
@@ -290,6 +361,8 @@ export default function AppPage() {
 
     const newId = result.circleId ? BigInt(result.circleId) : null;
     if (newId !== null) {
+      autoSettleRef.current = null;
+      clockAnchorRef.current = null;
       setActiveCircle(newId);
       await refresh(newId);
       setNotice(`Challenge #${newId.toString()} created. Copy the invite for friends`);
@@ -319,44 +392,15 @@ export default function AppPage() {
       setError(`Circle #${id.toString()} is empty`);
       return;
     }
-    const gasBuffer = parseEther("0.05");
+    const gasBuffer = parseEther("0.01");
     if (walletBal < stake + gasBuffer) {
       setError(
-        `Not enough MON to join. Need ~${mon(stake + gasBuffer, 3)} (stake + gas). You have ${mon(walletBal, 3)}.`,
+        `Not enough MON to join. Need ~${mon(stake + gasBuffer, 3)} (stake + network gas). You have ${mon(walletBal, 3)}.`,
       );
       return;
     }
     const result = await sendTx("join", [id], stake);
     if (result) await refresh(id);
-  };
-
-  /** Second browser optional — stake another demo friend into this lobby. */
-  const addDemoFriend = async (actor: Actor) => {
-    if (circleId === null || !circle) return;
-    const friend = FRIENDS.find((f) => f.actor === actor);
-    if (!friend) return;
-    setBusy(`adding ${friend.displayName}`);
-    setError(null);
-    try {
-      const res = await fetch("/api/action", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          actor,
-          fn: "join",
-          args: [`${circleId}n`],
-          value: circle.stake.toString(),
-        }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "join failed");
-      setNotice(`${friend.displayName} staked — you can Start round`);
-      await refresh(circleId);
-    } catch (err) {
-      setError(friendlyRpcError(err, `Couldn’t add ${friend.displayName}.`));
-    } finally {
-      setBusy(null);
-    }
   };
 
   const checkIn = async (file: File) => {
@@ -401,13 +445,21 @@ export default function AppPage() {
   };
 
   const phase: Phase = useMemo(() => {
+    void tick;
     if (!circle || circle.stake === 0n) return "none";
     if (circle.settled) return "settled";
     if (circle.endsAt === 0n) return "lobby";
-    if (BigInt(now) <= circle.endsAt) return "focus";
-    if (BigInt(now) <= circle.challengeEndsAt) return "challenge";
+    const anchor = clockAnchorRef.current;
+    if (anchor) {
+      if (Date.now() <= anchor.focusDeadlineMs) return "focus";
+      if (Date.now() <= anchor.challengeDeadlineMs) return "challenge";
+      return "ready";
+    }
+    const wall = Math.floor(Date.now() / 1000);
+    if (wall <= Number(circle.endsAt)) return "focus";
+    if (wall <= Number(circle.challengeEndsAt)) return "challenge";
     return "ready";
-  }, [circle, now]);
+  }, [circle, tick]);
 
   // Auto-settle when the dispute window closes — no manual Settle button.
   useEffect(() => {
@@ -426,11 +478,27 @@ export default function AppPage() {
     })();
   }, [phase, circleId, session, busy, sendTx, refresh]);
 
+  // Keep lobby / live round in sync across browsers without manual refresh.
+  useEffect(() => {
+    if (!ready || !session || circleId === null) return;
+    if (phase !== "lobby" && phase !== "focus") return;
+    const t = setInterval(() => void refresh(circleId), 4000);
+    return () => clearInterval(t);
+  }, [ready, session, circleId, phase, refresh]);
+
   const secondsLeft = useMemo(() => {
-    if (!circle) return 0;
-    const target = phase === "focus" ? circle.endsAt : phase === "challenge" ? circle.challengeEndsAt : 0n;
-    return target === 0n ? 0 : Math.max(0, Number(target) - now);
-  }, [circle, phase, now]);
+    void tick;
+    if (!circle || circle.endsAt === 0n || circle.settled) return 0;
+    const anchor = clockAnchorRef.current;
+    if (!anchor) return 0;
+    if (Date.now() <= anchor.focusDeadlineMs) {
+      return Math.max(0, Math.ceil((anchor.focusDeadlineMs - Date.now()) / 1000));
+    }
+    if (Date.now() <= anchor.challengeDeadlineMs) {
+      return Math.max(0, Math.ceil((anchor.challengeDeadlineMs - Date.now()) / 1000));
+    }
+    return 0;
+  }, [circle, tick]);
 
   const nameOf = (addr?: string) => {
     if (!addr) return "";
@@ -451,10 +519,6 @@ export default function AppPage() {
   const myMember = address
     ? board.find((m) => m.addr.toLowerCase() === address.toLowerCase())
     : undefined;
-  const demoJoinCandidates = FRIENDS.filter((f) => {
-    if (session && f.username === session.username) return false;
-    return !board.some((m) => actorMap[m.addr.toLowerCase()]?.toLowerCase() === f.username);
-  });
 
   const copyInvite = async () => {
     if (circleId === null) return;
@@ -462,6 +526,50 @@ export default function AppPage() {
     setInviteCopied(true);
     setTimeout(() => setInviteCopied(false), 2000);
   };
+
+  const resolveJoin = async (raw?: string) => {
+    const trimmed = (raw ?? joinId).trim().toUpperCase();
+    if (!trimmed) {
+      setError("Enter a challenge code to join");
+      return;
+    }
+    setError(null);
+    const res = await fetch("/api/challenges", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "resolve", code: trimmed }),
+    });
+    const body = await res.json();
+    if (res.ok && body.circleId) {
+      void joinCircle(BigInt(body.circleId));
+      return;
+    }
+    const id = fromInviteCode(trimmed);
+    if (id !== null) void joinCircle(id);
+    else setError(body.error ?? "Invalid challenge code");
+  };
+
+  const joinBar = (
+    <div className="join-inline">
+      <input
+        className="field-input"
+        value={joinId}
+        onChange={(e) => setJoinId(e.target.value.toUpperCase())}
+        placeholder="Challenge code"
+        spellCheck={false}
+        autoCapitalize="characters"
+        onKeyDown={(e) => e.key === "Enter" && void resolveJoin()}
+      />
+      <button
+        type="button"
+        className="btn btn-primary"
+        disabled={!joinId || !!busy}
+        onClick={() => void resolveJoin()}
+      >
+        Join challenge
+      </button>
+    </div>
+  );
 
   if (!ready || !session) {
     return null;
@@ -485,7 +593,7 @@ export default function AppPage() {
           <button type="button" className="btn btn-ghost" onClick={() => refresh()} disabled={!!busy}>
             Refresh
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
+          <button type="button" className="btn btn-ghost" onClick={() => setCreateOpen(true)}>
             + New challenge
           </button>
           <SignInButton session={session} onLogin={login} onLogout={logout} />
@@ -498,43 +606,13 @@ export default function AppPage() {
       <section className="ongoing">
         {phase === "none" ? (
           <div className="ongoing-empty">
-            <h1>No challenge yet</h1>
-            <p>Join a seeded challenge below, or create your own and share the challenge code.</p>
+            <h1>Join or create a challenge</h1>
+            <p>Enter a friend’s challenge code to stake in, or create Gym Streak and share yours.</p>
             <div className="ongoing-empty-actions">
-              <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-                Create challenge
+              {joinBar}
+              <button type="button" className="btn btn-ghost" onClick={() => setCreateOpen(true)}>
+                + New challenge
               </button>
-              <div className="join-inline">
-                <input
-                  className="field-input"
-                  value={joinId}
-                  onChange={(e) => setJoinId(e.target.value.toUpperCase())}
-                  placeholder="LOCK1 or code"
-                />
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={!joinId || !!busy}
-                  onClick={async () => {
-                    const trimmed = joinId.trim().toUpperCase();
-                    const res = await fetch("/api/challenges", {
-                      method: "POST",
-                      headers: { "content-type": "application/json" },
-                      body: JSON.stringify({ action: "resolve", code: trimmed }),
-                    });
-                    const body = await res.json();
-                    if (res.ok && body.circleId) {
-                      void joinCircle(BigInt(body.circleId));
-                      return;
-                    }
-                    const id = fromInviteCode(trimmed);
-                    if (id !== null) void joinCircle(id);
-                    else setError(body.error ?? "Invalid challenge code");
-                  }}
-                >
-                  Join
-                </button>
-              </div>
             </div>
           </div>
         ) : (
@@ -549,11 +627,7 @@ export default function AppPage() {
                 </p>
               </div>
               <div className={`ongoing-timer ${phase === "focus" && secondsLeft <= 15 ? "urgent" : ""}`}>
-                {phase === "focus" || phase === "challenge"
-                  ? fmtClock(secondsLeft)
-                  : phase === "lobby" && circle
-                    ? fmtClock(Number(circle.roundSeconds))
-                    : "--:--"}
+                {phase === "focus" || phase === "challenge" ? fmtClock(secondsLeft) : "--:--"}
               </div>
             </div>
 
@@ -561,13 +635,12 @@ export default function AppPage() {
               <div className="alert risk">
                 {pending.length === 1 ? (
                   <>
-                    <b>{nameOf(pending[0].addr)} is last.</b> {mon(circle!.stake)} MON on the line in{" "}
-                    {fmtClock(secondsLeft)}.
+                    <b>{nameOf(pending[0].addr)} hasn’t checked in.</b> {mon(circle!.stake)} MON on the
+                    line.
                   </>
                 ) : (
                   <>
-                    <b>{pending.length} friends have not checked in.</b> {mon(potAtStake)} MON at risk ·{" "}
-                    {fmtClock(secondsLeft)} left.
+                    <b>{pending.length} friends have not checked in.</b> {mon(potAtStake)} MON at risk.
                   </>
                 )}
               </div>
@@ -577,14 +650,14 @@ export default function AppPage() {
               <div className="alert risk">
                 {board.length < 2 ? (
                   <>
-                    <b>Timer starts after 2 friends stake.</b> You’re alone in this circle — add a
-                    demo friend below, or open another browser as Alice/Bob and join with code{" "}
-                    <code>{circleId !== null ? toInviteCode(circleId) : "—"}</code>.
+                    <b>Need a second friend.</b> Open another browser as Alice or Bob, then join with
+                    code <code>{circleId !== null ? toInviteCode(circleId) : "—"}</code>. Clock and
+                    upload start after <b>Start round</b>.
                   </>
                 ) : (
                   <>
-                    <b>{board.length} friends ready.</b> Hit <b>Start round</b> to start the clock —
-                    that’s when upload appears.
+                    <b>Both friends are in.</b> Hit <b>Start round</b> — the timer runs and upload
+                    appears.
                   </>
                 )}
               </div>
@@ -592,36 +665,51 @@ export default function AppPage() {
 
             {phase === "settled" && (
               <div className="alert ok">
-                This round already paid out. Create a new challenge, get both friends to stake, then hit{" "}
-                <b>Start round</b> — upload appears only while the timer is running.
+                Round paid out. Join a friend’s open challenge with their code, or create a new Gym
+                Streak.
               </div>
             )}
 
             <div className="ongoing-actions">
               {phase === "lobby" && iAmMember && board.length >= 2 && (
-                <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => sendTx("start", [circleId!]).then(() => refresh(circleId))}>
-                  Start round
-                </button>
-              )}
-              {phase === "lobby" && iAmMember && board.length < 2 && demoJoinCandidates.map((f) => (
                 <button
-                  key={f.actor}
                   type="button"
                   className="btn btn-primary"
                   disabled={!!busy}
-                  onClick={() => void addDemoFriend(f.actor)}
+                  onClick={() =>
+                    sendTx("start", [circleId!]).then((r) => {
+                      if (r) void refresh(circleId);
+                    })
+                  }
                 >
-                  Add {f.displayName} (demo)
+                  Start round
                 </button>
-              ))}
+              )}
+              {phase === "lobby" && iAmMember && board.length < 2 && (
+                <span className="busy-label">Waiting for friend to join…</span>
+              )}
               {phase === "lobby" && iAmMember && (
-                <button type="button" className="btn btn-danger" disabled={!!busy} onClick={() => sendTx("abort", [circleId!]).then(() => refresh(circleId))}>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={!!busy}
+                  onClick={() =>
+                    sendTx("abort", [circleId!]).then((r) => {
+                      if (r) void refresh(circleId);
+                    })
+                  }
+                >
                   Abort &amp; refund
                 </button>
               )}
               {phase === "lobby" && !iAmMember && session && (
-                <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => joinCircle(circleId!)}>
-                  Accept &amp; stake {mon(circle?.stake ?? 0n)} MON
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!!busy}
+                  onClick={() => joinCircle(circleId!)}
+                >
+                  Join challenge · stake {mon(circle?.stake ?? 0n)} MON
                 </button>
               )}
               {phase === "focus" && iAmMember && (
@@ -639,33 +727,29 @@ export default function AppPage() {
                 </label>
               )}
               {phase === "focus" && iAmMember && (
-                <button type="button" className="btn btn-danger" disabled={!!busy} onClick={() => sendTx("breakFocus", [circleId!]).then(() => refresh(circleId))}>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={!!busy}
+                  onClick={() =>
+                    sendTx("breakFocus", [circleId!]).then((r) => {
+                      if (r) void refresh(circleId);
+                    })
+                  }
+                >
                   Break focus
                 </button>
               )}
-              {phase === "ready" && (
-                <span className="busy-label">Settling payouts…</span>
-              )}
+              {phase === "ready" && <span className="busy-label">Settling payouts…</span>}
               {phase === "settled" && (
                 <>
-                  <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
+                  {joinBar}
+                  <button type="button" className="btn btn-ghost" onClick={() => setCreateOpen(true)}>
                     + New challenge
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => {
-                      setActiveCircle(null);
-                      setCircle(null);
-                      setBoard([]);
-                      setNotice("Create a challenge or join with a code");
-                    }}
-                  >
-                    Dismiss
                   </button>
                 </>
               )}
-              {phase !== "settled" && (
+              {phase === "lobby" && (
                 <button type="button" className="btn btn-ghost" onClick={copyInvite} disabled={circleId === null}>
                   {inviteCopied ? "Copied!" : "Copy invite code"}
                 </button>

@@ -113,7 +113,10 @@ export function CreateChallengeModal({ open, onClose, onCreate, busy }: Props) {
           </button>
         </header>
 
-        <p className="modal-lede">Pick a goal, set the stake, invite friends. They open the link in another browser, connect, and accept.</p>
+        <p className="modal-lede">
+          Pick Gym Streak, stake 0.01 MON (no app fee — escrow pays friends only), share the code.
+          Friend joins in another browser, then Start round. Upload appears while the 20s timer runs.
+        </p>
 
         <div className="preset-grid">
           {PRESETS.map((p, i) => (
@@ -124,6 +127,8 @@ export function CreateChallengeModal({ open, onClose, onCreate, busy }: Props) {
               onClick={() => {
                 setPresetIdx(i);
                 setStakeMon(p.stakeMon);
+                setRoundSeconds(p.round);
+                setChallengeSeconds(p.challenge);
               }}
             >
               <strong>{p.label}</strong>
@@ -146,7 +151,7 @@ export function CreateChallengeModal({ open, onClose, onCreate, busy }: Props) {
 
         <p className="field-label">Timer</p>
         <div className="timer-fields">
-          <TimerControl label="Round" value={roundSeconds} onChange={setRoundSeconds} step={10} min={5} />
+          <TimerControl label="Round" value={roundSeconds} onChange={setRoundSeconds} step={5} min={5} />
           <TimerControl
             label="Dispute window"
             value={challengeSeconds}
