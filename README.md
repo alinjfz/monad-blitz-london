@@ -175,7 +175,7 @@ We researched the category before building; see [docs/LANDSCAPE.md](docs/LANDSCA
 ---
 
 <p align="center">
-  <img src="docs/assets/social.png" alt="FocusBond — Miss it, pay your friends" width="720" />
+  <img src="docs/assets/social.jpg" alt="FocusBond — Miss it, pay your friends" width="720" />
   <br />
   <sub>Built at Monad Blitz London · Encode Hub · August 2026</sub>
 </p>
