@@ -1,52 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  decodeEventLog,
-  encodeFunctionData,
-  keccak256,
-  parseEther,
-  type Abi,
-  type Hex,
-} from "viem";
-import { useAccount, useWalletClient } from "wagmi";
-import { ConnectButton } from "@/components/ConnectButton";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { keccak256, parseEther, type Hex } from "viem";
 import { CreateChallengeModal } from "@/components/CreateChallengeModal";
-import { focusBondAbi } from "@/lib/abi";
-import {
-  explorerAddress,
-  explorerTx,
-  FAUCET_URL,
-  focusBondAddress,
-  GAS_LIMIT,
-  monadTestnet,
-  publicClient,
-} from "@/lib/chain";
+import { SignInButton } from "@/components/SignInButton";
+import { explorerAddress, explorerTx, FAUCET_URL } from "@/lib/chain";
 import { fmtClock, mon, phaseLabel, short, ZERO, ZERO_HASH } from "@/lib/format";
+import { SESSION_KEY, type FriendSession } from "@/lib/friends";
 import type { Circle, FeedItem, MemberView, Phase, Verdict } from "@/lib/types";
 import type { Preset } from "@/lib/presets";
 
-const STORAGE_KEY = "focusbond:circleId";
-const client = publicClient;
+const CIRCLE_KEY = "focusbond:circleId";
 
-function loadStoredCircleId(): bigint | null {
+function loadSession(): FriendSession | null {
   if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw || !/^\d+$/.test(raw)) return null;
-  return BigInt(raw);
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as FriendSession) : null;
+  } catch {
+    return null;
+  }
 }
 
-function storeCircleId(id: bigint | null) {
-  if (typeof window === "undefined") return;
-  if (id === null) localStorage.removeItem(STORAGE_KEY);
-  else localStorage.setItem(STORAGE_KEY, id.toString());
+function loadCircleId(): bigint | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(CIRCLE_KEY);
+  return raw && /^\d+$/.test(raw) ? BigInt(raw) : null;
 }
 
 export default function AppPage() {
-  const { address, isConnected, chainId } = useAccount();
-  const { data: walletClient } = useWalletClient();
-
+  const [session, setSession] = useState<FriendSession | null>(null);
+  const [actorMap, setActorMap] = useState<Record<string, string>>({});
   const [circleId, setCircleId] = useState<bigint | null>(null);
   const [joinId, setJoinId] = useState("");
   const [circle, setCircle] = useState<Circle | null>(null);
@@ -60,131 +45,115 @@ export default function AppPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [ready, setReady] = useState(false);
 
-  const fromBlock = useRef<bigint | null>(null);
-  const refreshing = useRef(false);
-  const circleIdRef = useRef<bigint | null>(null);
-  circleIdRef.current = circleId;
+  const address = session?.address as Hex | undefined;
+
+  const setActiveCircle = (id: bigint | null) => {
+    setCircleId(id);
+    if (id === null) localStorage.removeItem(CIRCLE_KEY);
+    else localStorage.setItem(CIRCLE_KEY, id.toString());
+  };
 
   const refresh = useCallback(async (idOverride?: bigint | null) => {
-    if (refreshing.current) return;
-    refreshing.current = true;
+    const id = idOverride !== undefined ? idOverride : circleId;
     try {
-      const id = idOverride !== undefined ? idOverride : circleIdRef.current;
+      const params = new URLSearchParams();
+      if (id !== null && id !== undefined) params.set("id", id.toString());
+      if (address) params.set("address", address);
+      params.set("logs", "1");
 
-      if (address) {
-        setWalletBal(await client.getBalance({ address }));
-      }
+      const res = await fetch(`/api/circle?${params}`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "refresh failed");
 
-      if (id === null) {
-        setCircle(null);
-        setBoard([]);
-        return;
-      }
+      if (body.balance) setWalletBal(BigInt(body.balance));
 
-      const raw = await client.readContract({
-        address: focusBondAddress,
-        abi: focusBondAbi,
-        functionName: "getCircle",
-        args: [id],
-      });
-      const brd = await client.readContract({
-        address: focusBondAddress,
-        abi: focusBondAbi,
-        functionName: "getBoard",
-        args: [id],
-      });
-      const c = raw as readonly unknown[];
-      const next: Circle = {
-        stake: c[0] as bigint,
-        goal: c[1] as string,
-        roundSeconds: c[2] as bigint,
-        challengeSeconds: c[3] as bigint,
-        endsAt: c[4] as bigint,
-        challengeEndsAt: c[5] as bigint,
-        settled: c[6] as boolean,
-        members: c[7] as readonly Hex[],
-        escrow: c[8] as bigint,
-      };
-
-      // Empty / aborted circle
-      if (next.stake === 0n && next.members.length === 0) {
-        setCircle(null);
-        setBoard([]);
-        setCircleId(null);
-        storeCircleId(null);
-        return;
-      }
-
-      setCircle(next);
-      setBoard(brd as unknown as MemberView[]);
-
-      const bn = await client.getBlockNumber();
-      if (fromBlock.current === null) fromBlock.current = bn > 120n ? bn - 120n : 0n;
-      const logs = await client.getLogs({
-        address: focusBondAddress,
-        fromBlock: fromBlock.current,
-        toBlock: bn,
-      });
-      fromBlock.current = bn + 1n;
-
-      const items: FeedItem[] = [];
-      for (const log of logs) {
-        try {
-          const ev = decodeEventLog({ abi: focusBondAbi, data: log.data, topics: log.topics });
-          items.push({
-            key: `${log.transactionHash}-${log.logIndex}`,
-            name: ev.eventName,
-            text: describe(ev.eventName, ev.args as Record<string, unknown>),
-            hash: log.transactionHash!,
-          });
-        } catch {
-          /* skip */
+      if (body.circle) {
+        const c = body.circle;
+        const next: Circle = {
+          stake: BigInt(c.stake),
+          goal: c.goal,
+          roundSeconds: BigInt(c.roundSeconds),
+          challengeSeconds: BigInt(c.challengeSeconds),
+          endsAt: BigInt(c.endsAt),
+          challengeEndsAt: BigInt(c.challengeEndsAt),
+          settled: c.settled,
+          members: c.members,
+          escrow: BigInt(c.escrow),
+        };
+        if (next.stake === 0n && next.members.length === 0) {
+          setCircle(null);
+          setBoard([]);
+          setActiveCircle(null);
+        } else {
+          setCircle(next);
+          setBoard(
+            (body.board as MemberView[]).map((m) => ({
+              ...m,
+              stats: {
+                ...m.stats,
+                earned: BigInt(String(m.stats.earned)),
+                lost: BigInt(String(m.stats.lost)),
+              },
+            })),
+          );
         }
+      } else if (id === null) {
+        setCircle(null);
+        setBoard([]);
       }
-      if (items.length) {
-        setFeed((prev) => {
-          const seen = new Set(prev.map((p) => p.key));
-          const merged = [...items.reverse().filter((i) => !seen.has(i.key)), ...prev];
-          return merged.slice(0, 40);
-        });
+
+      if (Array.isArray(body.feed)) {
+        setFeed(
+          body.feed.map((f: { key: string; name: string; args: Record<string, unknown>; hash: Hex }) => ({
+            key: f.key,
+            name: f.name,
+            text: describe(f.name, reviveArgs(f.args)),
+            hash: f.hash,
+          })),
+        );
       }
 
       setError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (!/15\/sec|rate|limited|429/i.test(message)) setError(message);
-    } finally {
-      refreshing.current = false;
     }
-  }, [address]);
+  }, [address, circleId]);
 
-  // Local clock only — no RPC.
   useEffect(() => {
     const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Load invite / stored circle once, then refresh.
   useEffect(() => {
+    const s = loadSession();
     const params = new URLSearchParams(window.location.search);
     const join = params.get("join");
-    const stored = loadStoredCircleId();
+    const stored = loadCircleId();
     const initial = join && /^\d+$/.test(join) ? BigInt(join) : stored;
-    if (join && /^\d+$/.test(join)) {
-      setJoinId(join);
-      storeCircleId(BigInt(join));
-    }
-    if (initial !== null) {
-      setCircleId(initial);
-      void refresh(initial);
-    } else if (address) {
-      void client.getBalance({ address }).then(setWalletBal).catch(() => undefined);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (join) setJoinId(join);
+    if (s) setSession(s);
+    if (initial !== null) setActiveCircle(initial);
+    setReady(true);
+    fetch("/api/actors")
+      .then((r) => r.json())
+      .then((actors: Record<string, string>) => {
+        const map: Record<string, string> = {};
+        for (const [name, addr] of Object.entries(actors)) {
+          if (addr) map[addr.toLowerCase()] = name.charAt(0) + name.slice(1).toLowerCase();
+        }
+        setActorMap(map);
+      })
+      .catch(() => undefined);
   }, []);
 
-  // Refresh when tab becomes visible again (friend joined in another browser).
+  useEffect(() => {
+    if (!ready) return;
+    void refresh(circleId);
+  }, [ready, session?.address]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === "visible") void refresh();
@@ -193,46 +162,42 @@ export default function AppPage() {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [refresh]);
 
-  // Refresh balance when wallet connects.
-  useEffect(() => {
-    if (address) void refresh();
-  }, [address, refresh]);
+  const login = (s: FriendSession) => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    setSession(s);
+    setNotice(`Signed in as ${s.displayName}`);
+  };
+
+  const logout = () => {
+    localStorage.removeItem(SESSION_KEY);
+    setSession(null);
+    setNotice("Signed out");
+  };
 
   const sendTx = useCallback(
-    async (fn: keyof typeof GAS_LIMIT, args: unknown[] = [], value?: bigint) => {
-      if (!address) {
-        setError("Connect a wallet first");
+    async (fn: string, args: unknown[] = [], value?: bigint) => {
+      if (!session) {
+        setError("Sign in as Alice, Bob, or Cara first");
         return null;
       }
-      if (!walletClient) {
-        setError("Wallet still connecting — try again in a second");
-        return null;
-      }
-      if (chainId !== monadTestnet.id) {
-        setError("Switch to Monad Testnet, then try again");
-        return null;
-      }
-
       setBusy(fn);
       setError(null);
       try {
-        const data = encodeFunctionData({
-          abi: focusBondAbi as Abi,
-          functionName: fn,
-          args: args as never[],
+        const res = await fetch("/api/action", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            actor: session.actor,
+            fn,
+            args: args.map((a) => (typeof a === "bigint" ? `${a}n` : a)),
+            value: value !== undefined ? value.toString() : undefined,
+          }),
         });
-        const hash = await walletClient.sendTransaction({
-          to: focusBondAddress,
-          data,
-          value,
-          gas: GAS_LIMIT[fn],
-          chain: monadTestnet,
-          account: address,
-        });
-        await client.waitForTransactionReceipt({ hash });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? "transaction failed");
+        if (body.balance) setWalletBal(BigInt(body.balance));
         setNotice(`${fn} confirmed`);
-        await refresh();
-        return hash as Hex;
+        return body as { hash: Hex; circleId?: string };
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         return null;
@@ -240,7 +205,7 @@ export default function AppPage() {
         setBusy(null);
       }
     },
-    [address, chainId, refresh, walletClient],
+    [session],
   );
 
   const createCircle = async ({
@@ -252,82 +217,64 @@ export default function AppPage() {
     stakeMon: string;
     customGoal: string;
   }) => {
-    if (!isConnected || !address) {
-      setError("Connect a wallet first to create a challenge");
+    if (!session) {
+      setError("Sign in first (alice/alice, bob/bob, or cara/cara)");
       return;
     }
-    if (!walletClient) {
-      setError("Wallet still connecting — wait a moment and try again");
-      return;
-    }
-
     const stake = parseEther(stakeMon || "0.1");
     if (walletBal > 0n && stake > walletBal) {
-      setError(`Not enough MON. Stake is ${stakeMon} MON; you have ${mon(walletBal, 3)} MON. Fund via the faucet.`);
+      setError(`Not enough MON. Need ${stakeMon}, have ${mon(walletBal, 3)}. Fund the friend wallet.`);
       return;
     }
-
     const goal = `${preset.label}: ${customGoal.trim() || preset.goal}`;
-    const before = (await client.readContract({
-      address: focusBondAddress,
-      abi: focusBondAbi,
-      functionName: "circleCount",
-    })) as bigint;
-
-    const hash = await sendTx(
+    const result = await sendTx(
       "createCircle",
       [stake, goal, BigInt(preset.round), BigInt(preset.challenge)],
       stake,
     );
-    if (!hash) return;
+    if (!result) return;
 
-    const after = (await client.readContract({
-      address: focusBondAddress,
-      abi: focusBondAbi,
-      functionName: "circleCount",
-    })) as bigint;
-    const newId = after > before ? after : after;
-    setCircleId(newId);
-    storeCircleId(newId);
-    fromBlock.current = null;
-    await refresh(newId);
+    const newId = result.circleId ? BigInt(result.circleId) : null;
+    if (newId !== null) {
+      setActiveCircle(newId);
+      await refresh(newId);
+      setNotice(`Challenge #${newId.toString()} created — copy the invite for friends`);
+    } else {
+      await refresh();
+      setNotice("Challenge created — hit Refresh if it doesn’t appear");
+    }
     setCreateOpen(false);
-    setNotice(`Challenge #${newId.toString()} created — copy the invite link for friends`);
-  };
-
-  const adoptCircle = async (id: bigint) => {
-    setCircleId(id);
-    storeCircleId(id);
-    fromBlock.current = null;
-    await refresh(id);
   };
 
   const joinCircle = async (id: bigint) => {
-    if (!isConnected) {
-      setError("Connect a wallet first to join");
+    if (!session) {
+      setError("Sign in first to join");
       return;
     }
-    await adoptCircle(id);
-    const raw = await client.readContract({
-      address: focusBondAddress,
-      abi: focusBondAbi,
-      functionName: "getCircle",
-      args: [id],
-    });
-    const stake = (raw as readonly unknown[])[0] as bigint;
+    setActiveCircle(id);
+    await refresh(id);
+    // Fetch stake via our API, then join
+    const res = await fetch(`/api/circle?id=${id.toString()}`);
+    const body = await res.json();
+    if (!res.ok || !body.circle) {
+      setError(body.error ?? `Circle #${id.toString()} not found`);
+      return;
+    }
+    const stake = BigInt(body.circle.stake);
     if (stake === 0n) {
-      setError(`Circle #${id.toString()} not found`);
+      setError(`Circle #${id.toString()} is empty`);
       return;
     }
-    await sendTx("join", [id], stake);
+    const result = await sendTx("join", [id], stake);
+    if (result) await refresh(id);
   };
 
   const checkIn = async (file: File) => {
-    if (circleId === null || !circle || !address) return;
+    if (circleId === null || !circle || !session || !address) return;
     const bytes = new Uint8Array(await file.arrayBuffer());
     const proofHash = keccak256(bytes);
-    const hash = await sendTx("submitProof", [circleId, proofHash]);
-    if (!hash) return;
+    const result = await sendTx("submitProof", [circleId, proofHash]);
+    if (!result) return;
 
     setBusy("referee reviewing");
     try {
@@ -348,6 +295,7 @@ export default function AppPage() {
       if (verdict.signature) {
         await sendTx("attest", [circleId, address, verdict.pass, verdict.signature]);
       }
+      await refresh(circleId);
     } catch (err) {
       setVerdicts((v) => ({
         ...v,
@@ -380,7 +328,7 @@ export default function AppPage() {
   const nameOf = (addr?: string) => {
     if (!addr) return "";
     if (address && addr.toLowerCase() === address.toLowerCase()) return "You";
-    return short(addr);
+    return actorMap[addr.toLowerCase()] ?? short(addr);
   };
 
   const pending = board.filter((m) => m.proofHash === ZERO_HASH && !m.broke);
@@ -410,7 +358,7 @@ export default function AppPage() {
           </a>
         </div>
         <div className="app-top-right">
-          {isConnected && (
+          {session && (
             <div className="bal-chip">
               {mon(walletBal, 3)} <small>MON</small>
             </div>
@@ -421,10 +369,15 @@ export default function AppPage() {
           <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
             + New challenge
           </button>
-          <ConnectButton />
+          <SignInButton session={session} onLogin={login} onLogout={logout} />
         </div>
       </header>
 
+      {!session && (
+        <div className="alert ok">
+          Sign in as <b>alice/alice</b>, <b>bob/bob</b>, or <b>cara/cara</b> — open each in a different browser to play as friends.
+        </div>
+      )}
       {error && <div className="alert err">{error}</div>}
       {notice && !error && <div className="alert ok">{notice}</div>}
 
@@ -432,10 +385,7 @@ export default function AppPage() {
         {phase === "none" ? (
           <div className="ongoing-empty">
             <h1>No challenge yet</h1>
-            <p>
-              Create one, then share the invite link. Friends open it in another browser, connect their
-              wallet, and accept.
-            </p>
+            <p>Sign in, create a challenge, then share the invite. Friends sign in on another browser and join.</p>
             <div className="ongoing-empty-actions">
               <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
                 Create challenge
@@ -477,13 +427,13 @@ export default function AppPage() {
               <div className="alert risk">
                 {pending.length === 1 ? (
                   <>
-                    <b>{nameOf(pending[0].addr)} is last.</b> {mon(circle!.stake)} MON goes to everyone else
-                    in {fmtClock(secondsLeft)} unless they check in.
+                    <b>{nameOf(pending[0].addr)} is last.</b> {mon(circle!.stake)} MON on the line in{" "}
+                    {fmtClock(secondsLeft)}.
                   </>
                 ) : (
                   <>
-                    <b>{pending.length} friends have not checked in.</b> {mon(potAtStake)} MON on the line
-                    with {fmtClock(secondsLeft)} left.
+                    <b>{pending.length} friends have not checked in.</b> {mon(potAtStake)} MON at risk ·{" "}
+                    {fmtClock(secondsLeft)} left.
                   </>
                 )}
               </div>
@@ -491,39 +441,19 @@ export default function AppPage() {
 
             <div className="ongoing-actions">
               {phase === "lobby" && iAmMember && board.length >= 2 && (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={!!busy}
-                  onClick={() => sendTx("start", [circleId!])}
-                >
+                <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => sendTx("start", [circleId!]).then(() => refresh(circleId))}>
                   Start round
                 </button>
               )}
               {phase === "lobby" && iAmMember && (
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  disabled={!!busy}
-                  onClick={() => sendTx("abort", [circleId!])}
-                >
+                <button type="button" className="btn btn-danger" disabled={!!busy} onClick={() => sendTx("abort", [circleId!]).then(() => refresh(circleId))}>
                   Abort &amp; refund
                 </button>
               )}
-              {phase === "lobby" && !iAmMember && isConnected && (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={!!busy}
-                  onClick={() => joinCircle(circleId!)}
-                >
+              {phase === "lobby" && !iAmMember && session && (
+                <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => joinCircle(circleId!)}>
                   Accept &amp; stake {mon(circle?.stake ?? 0n)} MON
                 </button>
-              )}
-              {phase === "lobby" && !isConnected && (
-                <p className="panel-hint" style={{ margin: 0 }}>
-                  Connect a wallet to accept this challenge.
-                </p>
               )}
               {phase === "focus" && iAmMember && (
                 <label className="file-btn">
@@ -540,22 +470,12 @@ export default function AppPage() {
                 </label>
               )}
               {phase === "focus" && iAmMember && (
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  disabled={!!busy}
-                  onClick={() => sendTx("breakFocus", [circleId!])}
-                >
+                <button type="button" className="btn btn-danger" disabled={!!busy} onClick={() => sendTx("breakFocus", [circleId!]).then(() => refresh(circleId))}>
                   Break focus
                 </button>
               )}
               {phase === "ready" && (
-                <button
-                  type="button"
-                  className="btn btn-settle"
-                  disabled={!!busy}
-                  onClick={() => sendTx("settle", [circleId!])}
-                >
+                <button type="button" className="btn btn-settle" disabled={!!busy} onClick={() => sendTx("settle", [circleId!]).then(() => refresh(circleId))}>
                   Settle — pay the friends who showed up
                 </button>
               )}
@@ -568,15 +488,10 @@ export default function AppPage() {
             {myMember && (
               <div className="my-status">
                 {statusBadge(myMember, phase)}
-                {verdicts[address ?? ""] && (
+                {address && verdicts[address] && (
                   <span className="verdict-inline">
-                    Referee:{" "}
-                    {verdicts[address!].pass === true
-                      ? "PASS"
-                      : verdicts[address!].pass === false
-                        ? "FAIL"
-                        : "—"}{" "}
-                    ({verdicts[address!].source})
+                    Referee: {verdicts[address].pass === true ? "PASS" : verdicts[address].pass === false ? "FAIL" : "—"} (
+                    {verdicts[address].source})
                   </span>
                 )}
               </div>
@@ -588,18 +503,11 @@ export default function AppPage() {
       <div className="app-grid">
         <section className="panel friends-panel">
           <header className="panel-head">
-            <h2>Friends</h2>
-            <span>Real wallets · share the invite</span>
+            <h2>Friends in circle</h2>
+            <span>alice · bob · cara across browsers</span>
           </header>
-
-          {!isConnected && (
-            <p className="panel-hint">Connect your wallet. Friends join from another browser with the invite link.</p>
-          )}
-
           <div className="friends-list">
-            {board.length === 0 && (
-              <p className="dim">No one in the circle yet. Create a challenge and share the invite.</p>
-            )}
+            {board.length === 0 && <p className="dim">No one yet. Create a challenge and share the invite.</p>}
             {board.map((m) => (
               <div
                 key={m.addr}
@@ -619,7 +527,7 @@ export default function AppPage() {
                       type="button"
                       className="btn btn-ghost btn-sm"
                       disabled={!!busy}
-                      onClick={() => sendTx("nudge", [circleId!, m.addr])}
+                      onClick={() => sendTx("nudge", [circleId!, m.addr]).then(() => refresh(circleId))}
                     >
                       Nudge
                     </button>
@@ -629,7 +537,7 @@ export default function AppPage() {
                       type="button"
                       className="btn btn-ghost btn-sm"
                       disabled={!!busy}
-                      onClick={() => sendTx("challenge", [circleId!, m.addr], circle?.stake)}
+                      onClick={() => sendTx("challenge", [circleId!, m.addr], circle?.stake).then(() => refresh(circleId))}
                     >
                       Dispute
                     </button>
@@ -657,7 +565,7 @@ export default function AppPage() {
                 </a>
               </div>
             ))}
-            {feed.length === 0 && <div className="dim">No events yet — refresh after a transaction</div>}
+            {feed.length === 0 && <div className="dim">No events yet</div>}
           </div>
         </section>
       </div>
@@ -690,14 +598,28 @@ function toBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
+function reviveArgs(args: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v === "string" && /^\d+$/.test(v) && (k.includes("stake") || k.includes("amount") || k === "id" || k.includes("Seconds") || k.includes("bond") || k.includes("payout"))) {
+      out[k] = BigInt(v);
+    } else if (Array.isArray(v)) {
+      out[k] = v.map((x) => (typeof x === "string" && /^\d+$/.test(x) ? BigInt(x) : x));
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 function describe(name: string, args: Record<string, unknown>) {
   const a = (k: string) => String(args[k] ?? "");
   const s = (k: string) => short(a(k));
   switch (name) {
     case "CircleCreated":
-      return `${s("creator")} opened "${a("goal")}" at ${mon(args.stake as bigint)} MON each`;
+      return `${s("creator")} opened "${a("goal")}" at ${mon(BigInt(String(args.stake ?? 0)))} MON each`;
     case "Joined":
-      return `${s("member")} staked ${mon(args.stake as bigint)} MON`;
+      return `${s("member")} staked ${mon(BigInt(String(args.stake ?? 0)))} MON`;
     case "Started":
       return "round started";
     case "ProofSubmitted":
@@ -713,7 +635,7 @@ function describe(name: string, args: Record<string, unknown>) {
     case "Settled": {
       const winners = (args.completers as Hex[]) ?? [];
       const paid = (args.payouts as bigint[]) ?? [];
-      return `settled: ${winners.map((w, i) => `${short(w)} +${mon(paid[i])}`).join(", ")}`;
+      return `settled: ${winners.map((w, i) => `${short(w)} +${mon(BigInt(String(paid[i] ?? 0)))}`).join(", ")}`;
     }
     case "CollectiveFail":
       return "nobody completed — stakes refunded";

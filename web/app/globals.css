@@ -1059,10 +1059,14 @@ select {
 }
 
 .connect-faucet {
-  display: block;
-  padding: 0.55rem 0.25rem 0.2rem;
-  color: var(--cool);
-  font-size: 0.85rem;
+  display: none;
+}
+
+.google-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
   font-weight: 650;
 }
 
@@ -1071,6 +1075,21 @@ select {
   font-size: 0.72rem;
   color: var(--muted);
   line-height: 1.4;
+}
+
+.login-panel .field-input {
+  margin-bottom: 0.55rem;
+}
+
+.login-sep {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 0.65rem 0;
+}
+
+.friend-quick {
+  display: grid;
+  gap: 0.35rem;
 }
 
 .connect-hint code {
