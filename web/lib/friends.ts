@@ -38,10 +38,11 @@ export type FriendSession = {
 
 export const SESSION_KEY = "focusbond:friend";
 
-/** Seeded mutual friendships for the demo. */
+/** Seeded mutual friendships — all demo friends start linked. */
 export const SEED_FRIENDSHIPS: [string, string][] = [
   ["alice", "bob"],
   ["bob", "cara"],
+  ["alice", "cara"],
 ];
 
 export function findFriend(username: string, password: string) {

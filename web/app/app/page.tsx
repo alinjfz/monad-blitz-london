@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { keccak256, parseEther, type Hex } from "viem";
 import { BrandMark } from "@/components/BrandMark";
 import { CollapsiblePanel } from "@/components/CollapsiblePanel";
@@ -59,6 +59,7 @@ export default function AppPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
   const [ready, setReady] = useState(false);
+  const autoSettleRef = useRef<string | null>(null);
 
   const address = session?.address as Hex | undefined;
 
@@ -118,14 +119,20 @@ export default function AppPage() {
       }
 
       if (Array.isArray(body.feed)) {
-        setFeed(
-          body.feed.map((f: { key: string; name: string; args: Record<string, unknown>; hash: Hex }) => ({
+        const next = body.feed.map(
+          (f: { key: string; name: string; args: Record<string, unknown>; hash: Hex }) => ({
             key: f.key,
             name: f.name,
             text: describe(f.name, reviveArgs(f.args)),
             hash: f.hash,
-          })),
+          }),
         );
+        setFeed(next);
+        try {
+          localStorage.setItem("focusbond:feed", JSON.stringify(next));
+        } catch {
+          /* ignore quota */
+        }
       }
 
       setError(null);
@@ -151,6 +158,12 @@ export default function AppPage() {
     if (join) setJoinId(join);
     if (s) setSession(s);
     if (initial !== null) setActiveCircle(initial);
+    try {
+      const cached = localStorage.getItem("focusbond:feed");
+      if (cached) setFeed(JSON.parse(cached) as FeedItem[]);
+    } catch {
+      /* ignore */
+    }
     setReady(true);
     fetch("/api/actors")
       .then((r) => r.json())
@@ -241,10 +254,14 @@ export default function AppPage() {
     preset,
     stakeMon,
     customGoal,
+    roundSeconds,
+    challengeSeconds,
   }: {
     preset: Preset;
     stakeMon: string;
     customGoal: string;
+    roundSeconds: number;
+    challengeSeconds: number;
   }) => {
     if (!session) {
       setError("Sign in first");
@@ -259,10 +276,13 @@ export default function AppPage() {
       );
       return;
     }
-    const goal = `${preset.label}: ${customGoal.trim() || preset.goal}`;
+    const goal =
+      preset.id === "custom"
+        ? customGoal.trim()
+        : `${preset.label}: ${customGoal.trim() || preset.goal}`;
     const result = await sendTx(
       "createCircle",
-      [stake, goal, BigInt(preset.round), BigInt(preset.challenge)],
+      [stake, goal, BigInt(roundSeconds), BigInt(challengeSeconds)],
       stake,
     );
     if (!result) return;
@@ -358,6 +378,23 @@ export default function AppPage() {
     if (BigInt(now) <= circle.challengeEndsAt) return "challenge";
     return "ready";
   }, [circle, now]);
+
+  // Auto-settle when the dispute window closes — no manual Settle button.
+  useEffect(() => {
+    if (phase !== "ready" || circleId === null || !session || busy) return;
+    const key = circleId.toString();
+    if (autoSettleRef.current === key) return;
+    autoSettleRef.current = key;
+    void (async () => {
+      const result = await sendTx("settle", [circleId]);
+      if (result) {
+        setNotice("Settled — payouts sent to friends who showed up");
+        await refresh(circleId);
+      } else {
+        autoSettleRef.current = null;
+      }
+    })();
+  }, [phase, circleId, session, busy, sendTx, refresh]);
 
   const secondsLeft = useMemo(() => {
     if (!circle) return 0;
@@ -534,14 +571,12 @@ export default function AppPage() {
                 </button>
               )}
               {phase === "ready" && (
-                <button type="button" className="btn btn-settle" disabled={!!busy} onClick={() => sendTx("settle", [circleId!]).then(() => refresh(circleId))}>
-                  Settle: pay the friends who showed up
-                </button>
+                <span className="busy-label">Settling payouts…</span>
               )}
               <button type="button" className="btn btn-ghost" onClick={copyInvite} disabled={circleId === null}>
                 {inviteCopied ? "Copied!" : "Copy invite code"}
               </button>
-              {busy && <span className="busy-label">{busy}…</span>}
+              {busy && busy !== "settle" && <span className="busy-label">{busy}…</span>}
             </div>
 
             {myMember && (

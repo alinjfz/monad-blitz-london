@@ -1,25 +1,51 @@
 import { NextResponse } from "next/server";
-import { friendByCode, friendByUsername, SEED_FRIENDSHIPS } from "@/lib/friends";
+import { friendByCode, friendByUsername, FRIENDS, SEED_FRIENDSHIPS } from "@/lib/friends";
+import { readJson, writeJson } from "@/lib/persist";
 
-/** In-memory mutual friend links for the demo (resets on server restart). */
-const links = new Map<string, Set<string>>();
-let seeded = false;
+type Store = Record<string, string[]>;
 
-function ensureSeeded() {
-  if (seeded) return;
-  seeded = true;
+function defaultStore(): Store {
+  const store: Store = {};
+  for (const f of FRIENDS) store[f.username] = [];
   for (const [a, b] of SEED_FRIENDSHIPS) {
-    if (!links.has(a)) links.set(a, new Set());
-    if (!links.has(b)) links.set(b, new Set());
-    links.get(a)!.add(b);
-    links.get(b)!.add(a);
+    if (!store[a].includes(b)) store[a].push(b);
+    if (!store[b].includes(a)) store[b].push(a);
   }
+  return store;
 }
 
-function listFor(username: string) {
-  ensureSeeded();
-  const set = links.get(username.toLowerCase()) ?? new Set<string>();
-  return [...set]
+function loadStore(): Store {
+  const stored = readJson<Store | null>("friends.json", null);
+  if (!stored) {
+    const seed = defaultStore();
+    writeJson("friends.json", seed);
+    return seed;
+  }
+  // Ensure seed links always exist.
+  let dirty = false;
+  for (const f of FRIENDS) {
+    if (!stored[f.username]) {
+      stored[f.username] = [];
+      dirty = true;
+    }
+  }
+  for (const [a, b] of SEED_FRIENDSHIPS) {
+    if (!stored[a].includes(b)) {
+      stored[a].push(b);
+      dirty = true;
+    }
+    if (!stored[b].includes(a)) {
+      stored[b].push(a);
+      dirty = true;
+    }
+  }
+  if (dirty) writeJson("friends.json", stored);
+  return stored;
+}
+
+function listFor(store: Store, username: string) {
+  const set = store[username.toLowerCase()] ?? [];
+  return set
     .map((u) => friendByUsername(u))
     .filter(Boolean)
     .map((f) => ({
@@ -36,15 +62,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "unknown user" }, { status: 400 });
   }
   const me = friendByUsername(user)!;
+  const store = loadStore();
   return NextResponse.json({
-    friends: listFor(user),
+    friends: listFor(store, user),
     me: { username: me.username, displayName: me.displayName, code: me.code },
   });
 }
 
 export async function POST(req: Request) {
   try {
-    ensureSeeded();
     const body = await req.json();
     const me = String(body.username ?? "").trim().toLowerCase();
     const code = String(body.code ?? "");
@@ -59,13 +85,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "That’s your own code" }, { status: 400 });
     }
 
-    if (!links.has(me)) links.set(me, new Set());
-    if (!links.has(other.username)) links.set(other.username, new Set());
-    links.get(me)!.add(other.username);
-    links.get(other.username)!.add(me);
+    const store = loadStore();
+    if (!store[me]) store[me] = [];
+    if (!store[other.username]) store[other.username] = [];
+    if (!store[me].includes(other.username)) store[me].push(other.username);
+    if (!store[other.username].includes(me)) store[other.username].push(me);
+    writeJson("friends.json", store);
 
     return NextResponse.json({
-      friends: listFor(me),
+      friends: listFor(store, me),
       added: {
         username: other.username,
         displayName: other.displayName,

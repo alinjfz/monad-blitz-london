@@ -1530,6 +1530,21 @@ select {
   color: var(--muted);
 }
 
+.preset-tile.preset-custom {
+  border-style: dashed;
+}
+
+.time-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.time-field .field-input {
+  margin-bottom: 0.75rem;
+}
+
 .field-label {
   display: block;
   font-size: 0.75rem;

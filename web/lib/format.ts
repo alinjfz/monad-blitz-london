@@ -19,8 +19,8 @@ export function phaseLabel(phase: string) {
       lobby: "Waiting for friends",
       focus: "Challenge live",
       challenge: "Dispute window",
-      ready: "Ready to settle",
-      settled: "Settled",
+      ready: "Settling…",
+      settled: "Settled — paid out",
     } as Record<string, string>
   )[phase] ?? phase;
 }

@@ -2,7 +2,31 @@ import { NextResponse } from "next/server";
 import { decodeEventLog, type Hex } from "viem";
 import { focusBondAbi } from "@/lib/abi";
 import { focusBondAddress, publicClient } from "@/lib/chain";
+import { readJson, writeJson } from "@/lib/persist";
 import { friendlyRpcError, withRpcRetry } from "@/lib/rpc";
+
+type StoredFeedItem = {
+  key: string;
+  name: string;
+  args: Record<string, unknown>;
+  hash: string;
+  at?: number;
+};
+
+function loadFeed(): StoredFeedItem[] {
+  return readJson<StoredFeedItem[]>("feed.json", []);
+}
+
+function saveFeed(items: StoredFeedItem[]) {
+  // Keep a long rolling history for the demo.
+  writeJson("feed.json", items.slice(0, 200));
+}
+
+function mergeFeed(existing: StoredFeedItem[], incoming: StoredFeedItem[]) {
+  const map = new Map<string, StoredFeedItem>();
+  for (const item of [...existing, ...incoming]) map.set(item.key, item);
+  return [...map.values()].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+}
 
 /** Server-side circle read — keeps browser off the rate-limited public RPC. */
 export async function GET(req: Request) {
@@ -63,11 +87,12 @@ export async function GET(req: Request) {
       }));
     }
 
-    // Optional recent logs for the feed (narrow window) — never fail the whole refresh.
+    // Always return a persistent feed; refresh from chain when possible.
+    const persisted = loadFeed();
     if (searchParams.get("logs") === "1") {
       try {
         const bn = await withRpcRetry(() => publicClient.getBlockNumber());
-        const from = bn > 40n ? bn - 40n : 0n;
+        const from = bn > 2_000n ? bn - 2_000n : 0n;
         const logs = await withRpcRetry(() =>
           publicClient.getLogs({
             address: focusBondAddress,
@@ -75,28 +100,37 @@ export async function GET(req: Request) {
             toBlock: bn,
           }),
         );
-        const feed = [];
+        const incoming: StoredFeedItem[] = [];
         for (const log of logs) {
           try {
             const ev = decodeEventLog({ abi: focusBondAbi, data: log.data, topics: log.topics });
-            feed.push({
+            incoming.push({
               key: `${log.transactionHash}-${log.logIndex}`,
               name: ev.eventName,
               args: serializeArgs(ev.args as Record<string, unknown>),
-              hash: log.transactionHash,
+              hash: log.transactionHash!,
+              at: Number(log.blockNumber ?? 0n),
             });
           } catch {
             /* skip */
           }
         }
-        out.feed = feed.reverse().slice(0, 30);
+        const merged = mergeFeed(persisted, incoming);
+        saveFeed(merged);
+        out.feed = merged.slice(0, 80);
       } catch {
-        out.feed = [];
+        out.feed = persisted.slice(0, 80);
       }
+    } else {
+      out.feed = persisted.slice(0, 80);
     }
 
     return NextResponse.json(out);
   } catch (err) {
+    const persisted = loadFeed();
+    if (persisted.length) {
+      return NextResponse.json({ feed: persisted.slice(0, 80) });
+    }
     return NextResponse.json({ error: friendlyRpcError(err) }, { status: 503 });
   }
 }

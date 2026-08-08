@@ -8,12 +8,19 @@ import {
 import { focusBondAbi } from "@/lib/abi";
 import { focusBondAddress, publicClient } from "@/lib/chain";
 import { friendByUsername } from "@/lib/friends";
+import { readJson, writeJson } from "@/lib/persist";
 import { friendlyRpcError, withRpcRetry } from "@/lib/rpc";
 import { SEED_CHALLENGES, seedByCode } from "@/lib/seed-challenges";
 import { actorWallet } from "@/lib/server";
 
-/** seed code → onchain circle id */
-const circleByCode = new Map<string, string>();
+/** seed code → onchain circle id (persisted) */
+function loadCircles() {
+  return new Map<string, string>(Object.entries(readJson<Record<string, string>>("seed-circles.json", {})));
+}
+
+function saveCircles(map: Map<string, string>) {
+  writeJson("seed-circles.json", Object.fromEntries(map));
+}
 
 const CREATE_GAS = 320_000n;
 
@@ -21,6 +28,7 @@ async function ensureSeed(code: string) {
   const seed = seedByCode(code);
   if (!seed) return { error: "unknown seed code" as const };
 
+  const circleByCode = loadCircles();
   const existing = circleByCode.get(seed.code);
   if (existing) {
     try {
@@ -97,6 +105,7 @@ async function ensureSeed(code: string) {
     if (!circleId) return { seed, error: "created but no circle id in receipt" };
 
     circleByCode.set(seed.code, circleId);
+    saveCircles(circleByCode);
     return { seed, circleId, hash };
   } catch (err) {
     return { seed, error: friendlyRpcError(err) };
@@ -144,6 +153,7 @@ async function describe(code: string, circleId: string | undefined) {
 }
 
 export async function GET() {
+  const circleByCode = loadCircles();
   const challenges = [];
   for (const seed of SEED_CHALLENGES) {
     challenges.push(await describe(seed.code, circleByCode.get(seed.code)));
@@ -162,6 +172,7 @@ export async function POST(req: Request) {
       for (const seed of SEED_CHALLENGES) {
         results.push(await ensureSeed(seed.code));
       }
+      const circleByCode = loadCircles();
       const challenges = [];
       for (const seed of SEED_CHALLENGES) {
         challenges.push(await describe(seed.code, circleByCode.get(seed.code)));
